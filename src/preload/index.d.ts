@@ -117,6 +117,14 @@ interface HermesAPI {
   checkInstall: () => Promise<InstallStatus>;
   verifyInstall: () => Promise<boolean>;
   startInstall: () => Promise<{ success: boolean; error?: string }>;
+  inspectInstallTarget: () => Promise<{
+    hermesHome: string;
+    repoPath: string;
+    state: "fresh" | "update" | "replace";
+  }>;
+  validateHermesHome: (dir: string) => Promise<boolean>;
+  adoptHermesHome: (dir: string) => Promise<boolean>;
+  quitApp: () => Promise<void>;
   onInstallProgress: (
     callback: (progress: InstallProgress) => void,
   ) => () => void;

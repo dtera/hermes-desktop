@@ -159,6 +159,7 @@ function App(): React.JSX.Element {
           <Install
             onComplete={handleInstallComplete}
             onFailed={handleInstallFailed}
+            onCancel={() => setScreen("welcome")}
           />
         );
       case "setup":

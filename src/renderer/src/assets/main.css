@@ -589,6 +589,77 @@ body {
   gap: 10px;
 }
 
+/* Pre-install confirmation (issue #272) */
+.install-confirm {
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.install-confirm-location {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.install-confirm-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.install-confirm-path {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.install-confirm-state {
+  font-size: 14px;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.install-confirm-state--replace {
+  padding: 10px 12px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+}
+
+.install-confirm-note,
+.install-confirm-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.install-confirm-hint {
+  color: var(--text-muted);
+}
+
+.install-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.install-confirm-error {
+  font-size: 13px;
+  color: var(--error);
+  margin: 0;
+}
+
 .verify-warning-banner {
   display: flex;
   align-items: center;

@@ -26,6 +26,21 @@ const hermesAPI = {
   startInstall: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("start-install"),
 
+  // Pre-install inspection + "use an existing installation" (issue #272)
+  inspectInstallTarget: (): Promise<{
+    hermesHome: string;
+    repoPath: string;
+    state: "fresh" | "update" | "replace";
+  }> => ipcRenderer.invoke("inspect-install-target"),
+
+  validateHermesHome: (dir: string): Promise<boolean> =>
+    ipcRenderer.invoke("validate-hermes-home", dir),
+
+  adoptHermesHome: (dir: string): Promise<boolean> =>
+    ipcRenderer.invoke("adopt-hermes-home", dir),
+
+  quitApp: (): Promise<void> => ipcRenderer.invoke("quit-app"),
+
   onInstallProgress: (
     callback: (progress: {
       step: number;

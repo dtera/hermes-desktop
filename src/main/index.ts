@@ -19,6 +19,9 @@ import {
   checkInstallStatus,
   verifyInstall,
   runInstall,
+  inspectInstallTarget,
+  validateHermesHome,
+  setHermesHomeOverride,
   getHermesVersion,
   clearVersionCache,
   runHermesDoctor,
@@ -388,6 +391,22 @@ function setupIPC(): void {
       return { success: false, error: (err as Error).message };
     }
   });
+
+  // Pre-install inspection + "use an existing installation" (issue #272).
+  ipcMain.handle("inspect-install-target", () => inspectInstallTarget());
+  ipcMain.handle("validate-hermes-home", (_event, dir: string) =>
+    validateHermesHome(dir),
+  );
+  ipcMain.handle("adopt-hermes-home", (_event, dir: string) => {
+    if (!validateHermesHome(dir)) return false;
+    // Persist the choice only. HERMES_HOME is resolved once at module
+    // load, so the override takes effect on the next launch — the renderer
+    // asks the user to restart. (An app-driven relaunch is unreliable
+    // under the dev server, which is torn down with the process.)
+    setHermesHomeOverride(dir);
+    return true;
+  });
+  ipcMain.handle("quit-app", () => app.quit());
 
   // Hermes engine info
   ipcMain.handle("get-hermes-version", async () => {
