@@ -1,14 +1,28 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { HERMES_HOME } from "./installer";
-import { safeWriteFile } from "./utils";
+import {
+  profileHome,
+  getActiveProfileNameSync,
+  activeStateDbPath,
+  safeWriteFile,
+} from "./utils";
 import Database from "better-sqlite3";
 import { t } from "../shared/i18n";
 import { getAppLocale } from "./locale";
 
-const CACHE_DIR = join(HERMES_HOME, "desktop");
-const CACHE_FILE = join(CACHE_DIR, "sessions.json");
-const DB_PATH = join(HERMES_HOME, "state.db");
+/**
+ * The session cache lives alongside its own profile's data so profiles
+ * don't share a single cache file. The default profile keeps
+ * ~/.hermes/desktop/sessions.json; named profiles use
+ * ~/.hermes/profiles/<name>/desktop/sessions.json (issue #311).
+ */
+function cacheFilePath(): string {
+  return join(
+    profileHome(getActiveProfileNameSync()),
+    "desktop",
+    "sessions.json",
+  );
+}
 
 export interface CachedSession {
   id: string;
@@ -56,9 +70,10 @@ function generateTitle(message: string): string {
 }
 
 function readCache(): CacheData {
+  const file = cacheFilePath();
   try {
-    if (!existsSync(CACHE_FILE)) return { sessions: [], lastSync: 0 };
-    return JSON.parse(readFileSync(CACHE_FILE, "utf-8"));
+    if (!existsSync(file)) return { sessions: [], lastSync: 0 };
+    return JSON.parse(readFileSync(file, "utf-8"));
   } catch {
     return { sessions: [], lastSync: 0 };
   }
@@ -66,15 +81,16 @@ function readCache(): CacheData {
 
 function writeCache(data: CacheData): void {
   try {
-    safeWriteFile(CACHE_FILE, JSON.stringify(data));
+    safeWriteFile(cacheFilePath(), JSON.stringify(data));
   } catch {
     // non-fatal
   }
 }
 
 function getDb(): Database.Database | null {
-  if (!existsSync(DB_PATH)) return null;
-  return new Database(DB_PATH, { readonly: true });
+  const dbPath = activeStateDbPath();
+  if (!existsSync(dbPath)) return null;
+  return new Database(dbPath, { readonly: true });
 }
 
 // Sync from hermes DB to local cache — only fetches new/updated sessions

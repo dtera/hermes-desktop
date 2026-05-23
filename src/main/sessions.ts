@@ -1,12 +1,9 @@
 import Database from "better-sqlite3";
-import { join } from "path";
 import { existsSync } from "fs";
-import { HERMES_HOME } from "./installer";
+import { activeStateDbPath } from "./utils";
 import type { Attachment } from "../shared/attachments";
 import { isImageMime } from "../shared/attachments";
 import { removeSessionFromCache } from "./session-cache";
-
-const DB_PATH = join(HERMES_HOME, "state.db");
 
 // Sentinel prefix used by hermes-agent's hermes_state.py to mark
 // JSON-encoded multimodal content in the messages.content column.
@@ -122,8 +119,11 @@ export interface SearchResult {
 }
 
 function getDb(readonly = true): Database.Database | null {
-  if (!existsSync(DB_PATH)) return null;
-  return new Database(DB_PATH, readonly ? { readonly: true } : {});
+  // Open the active profile's session DB — named profiles keep their
+  // sessions under ~/.hermes/profiles/<name>/state.db (issue #311).
+  const dbPath = activeStateDbPath();
+  if (!existsSync(dbPath)) return null;
+  return new Database(dbPath, readonly ? { readonly: true } : {});
 }
 
 export function listSessions(limit = 30, offset = 0): SessionSummary[] {
