@@ -56,7 +56,7 @@ function Gateway({ profile }: { profile?: string }): React.JSX.Element {
         const status = await window.hermesAPI.gatewayStatus();
         setGatewayRunning(status);
         gatewayStatusTimeoutRef.current = null;
-      }, 2000);
+      }, 5000);
     }
   }
 
