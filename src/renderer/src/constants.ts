@@ -47,6 +47,7 @@ export const PROVIDERS = {
     // looking for "Ollama" or "LM Studio" do not have to discover the
     // generic custom-provider path first.
     { value: "lmstudio", label: "constants.lmstudio" },
+    { value: "atomicchat", label: "constants.atomicchat" },
     { value: "ollama", label: "constants.ollama" },
     { value: "vllm", label: "constants.vllm" },
     { value: "llamacpp", label: "constants.llamacpp" },
@@ -83,6 +84,7 @@ export const PROVIDERS = {
     minimax: "MiniMax",
     nous: "constants.nousName",
     lmstudio: "constants.lmstudio",
+    atomicchat: "constants.atomicchat",
     ollama: "constants.ollama",
     vllm: "constants.vllm",
     llamacpp: "constants.llamacpp",

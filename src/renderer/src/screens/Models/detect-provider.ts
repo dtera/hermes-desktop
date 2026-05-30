@@ -26,7 +26,7 @@ export function detectProviderFromUrl(rawUrl: string): string | null {
   // require a private-IP match for the port-only heuristic.
   if (/:11434(\/|$)/.test(url)) return "ollama";
   if (/:1234(\/|$)/.test(url)) return "lmstudio";
-  if (/:1337(\/|$)/.test(url)) return "custom";
+  if (/:1337(\/|$)/.test(url)) return "atomicchat";
   if (/:8000(\/|$)/.test(url)) return "vllm";
   if (/:8080(\/|$)/.test(url)) return "llamacpp";
 
