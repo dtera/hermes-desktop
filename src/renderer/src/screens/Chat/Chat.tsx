@@ -16,6 +16,8 @@ import { buildChatTranscript } from "./transcriptUtils";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
 import type { Attachment } from "../../../../shared/attachments";
 import type { ChatMessage, UsageState } from "./types";
+import type { ContextUsage } from "./ContextGauge";
+import { contextWindowForModel } from "./contextWindows";
 
 interface QueuedMessage {
   text: string;
@@ -331,6 +333,16 @@ function Chat({
     [eventHasFiles],
   );
 
+  // Context-gauge data: the latest turn's prompt tokens vs the model's window.
+  const contextUsage: ContextUsage | null = usage?.contextTokens
+    ? {
+        used: usage.contextTokens,
+        window: contextWindowForModel(modelConfig.currentModel),
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens,
+      }
+    : null;
+
   return (
     <div
       className="chat-container"
@@ -390,6 +402,8 @@ function Chat({
           hasSession={!!hermesSessionId}
           sessionId={hermesSessionId}
           remoteMode={remoteMode}
+          profile={profile}
+          contextUsage={contextUsage}
           readiness={readiness}
           onSubmit={handleSubmitOrQueue}
           onQuickAsk={actions.handleQuickAsk}

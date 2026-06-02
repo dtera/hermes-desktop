@@ -151,6 +151,76 @@ export async function ensureSshTunnelIfNeeded(): Promise<void> {
   }
 }
 
+/** Pick a Whisper model name appropriate for the provider's base URL. */
+function whisperModelForBaseUrl(baseUrl: string): string {
+  if (/api\.groq\.com/i.test(baseUrl)) return "whisper-large-v3-turbo";
+  // OpenAI and most OpenAI-compatible gateways accept whisper-1.
+  return "whisper-1";
+}
+
+/**
+ * Transcribe a recorded audio clip to text via the active profile's provider.
+ *
+ * The local gateway has no audio endpoint, so this goes straight to the
+ * profile's OpenAI-compatible provider (`{baseUrl}/audio/transcriptions`) — the
+ * same base URL + key the model uses (e.g. Groq Whisper). Used as the desktop's
+ * voice-input fallback when the browser SpeechRecognition API is unavailable.
+ *
+ * Throws with a user-readable message when no transcription-capable endpoint /
+ * key is configured, so the caller can surface it.
+ */
+export async function transcribeAudio(
+  audio: Uint8Array,
+  mimeType: string,
+  profile?: string,
+): Promise<string> {
+  const resolved = resolveProfile(profile);
+  const mc = getModelConfig(resolved);
+  const baseUrl = (mc.baseUrl || "").replace(/\/+$/, "");
+  if (!baseUrl) {
+    throw new Error(
+      "Voice input needs an OpenAI-compatible base URL (e.g. Groq) on the active model. Set one in Models, or type your message.",
+    );
+  }
+
+  // Resolve the provider key the same way the chat path does: URL-specific key
+  // first, then the generic CUSTOM_API_KEY / OPENAI_API_KEY fallbacks.
+  const env = readEnv(resolved);
+  let apiKey = "";
+  for (const { pattern, envKey } of URL_KEY_MAP) {
+    if (pattern.test(baseUrl)) {
+      apiKey = (env[envKey] || "").trim();
+      break;
+    }
+  }
+  if (!apiKey) apiKey = (env.CUSTOM_API_KEY || env.OPENAI_API_KEY || "").trim();
+
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([audio as BlobPart], { type: mimeType || "audio/webm" }),
+    "speech.webm",
+  );
+  form.append("model", whisperModelForBaseUrl(baseUrl));
+
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const res = await fetch(`${baseUrl}/audio/transcriptions`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Transcription failed (${res.status}). ${body.slice(0, 200)}`.trim(),
+    );
+  }
+  const data = (await res.json().catch(() => null)) as { text?: string } | null;
+  return (data?.text || "").trim();
+}
+
 interface ChatHandle {
   abort: () => void;
 }
@@ -274,6 +344,8 @@ export interface ChatCallbacks {
     cost?: number;
     rateLimitRemaining?: number;
     rateLimitReset?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
   }) => void;
 }
 
@@ -588,6 +660,13 @@ function sendMessageViaApi(
           cost: parsed.usage.cost,
           rateLimitRemaining: parsed.usage.rate_limit_remaining,
           rateLimitReset: parsed.usage.rate_limit_reset,
+          // Prompt-cache stats for the context gauge. The gateway emits
+          // cache_read_tokens / cache_write_tokens; OpenAI-style providers
+          // expose cached_tokens under prompt_tokens_details.
+          cacheReadTokens:
+            parsed.usage.cache_read_tokens ??
+            parsed.usage.prompt_tokens_details?.cached_tokens,
+          cacheWriteTokens: parsed.usage.cache_write_tokens,
         });
       }
 

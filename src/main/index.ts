@@ -7,6 +7,7 @@ import {
   Notification,
   dialog,
   clipboard,
+  session,
 } from "electron";
 import { join, extname } from "path";
 import { readdir, readFile } from "fs/promises";
@@ -48,6 +49,7 @@ import {
   isRemoteMode,
   isRemoteOnlyMode,
   sendMessage,
+  transcribeAudio,
   startGateway,
   stopGateway,
   isGatewayRunning,
@@ -798,6 +800,16 @@ function setupIPC(): void {
   });
 
   // Chat — lazy-start gateway on first message
+  ipcMain.handle(
+    "transcribe-audio",
+    async (
+      _event,
+      audio: Uint8Array,
+      mimeType: string,
+      profile?: string,
+    ): Promise<string> => transcribeAudio(audio, mimeType, profile),
+  );
+
   ipcMain.handle(
     "send-message",
     async (
@@ -1890,6 +1902,18 @@ if (process.env.ENABLE_CDP === "1") {
 app.whenReady().then(() => {
   app.name = "Hermes";
   electronApp.setAppUserModelId("com.nousresearch.hermes");
+
+  // Allow microphone access for the app's own renderer (voice input). Without
+  // a handler Electron denies getUserMedia by default. Scoped to the `media`
+  // permission only; everything else stays denied.
+  session.defaultSession.setPermissionRequestHandler(
+    (_wc, permission, callback) => {
+      callback(permission === "media");
+    },
+  );
+  session.defaultSession.setPermissionCheckHandler(
+    (_wc, permission) => permission === "media",
+  );
 
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);

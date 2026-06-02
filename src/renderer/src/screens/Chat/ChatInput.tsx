@@ -7,17 +7,19 @@ import {
   forwardRef,
   useImperativeHandle,
 } from "react";
-import { Send, Square as Stop, Slash, Paperclip } from "lucide-react";
+import { Send, Square as Stop, Slash, Paperclip, Mic } from "lucide-react";
 import { isImeComposing } from "./keyboard";
 import { useI18n } from "../../components/useI18n";
 import { SLASH_COMMANDS, type SlashCommand } from "./slashCommands";
 import { useInputHistory } from "./hooks/useInputHistory";
+import { useVoiceInput } from "./hooks/useVoiceInput";
 import {
   processFiles,
   filesFromClipboard,
   type AttachmentError,
 } from "./attachmentUtils";
 import { AttachmentChip } from "../../components/AttachmentChip";
+import { ContextGauge, type ContextUsage } from "./ContextGauge";
 import type { Attachment } from "../../../../shared/attachments";
 
 export interface ChatInputHandle {
@@ -41,6 +43,10 @@ interface ChatInputProps {
   hasSession: boolean;
   sessionId?: string | null;
   remoteMode?: boolean;
+  /** Active profile — used to resolve the provider for voice transcription. */
+  profile?: string;
+  /** Context-window occupancy for the gauge; null until the first response. */
+  contextUsage?: ContextUsage | null;
   /** Pre-send validation state. When `ok` is false, Send is disabled
    * and an inline banner explains why + how to fix it. */
   readiness?: ChatInputReadiness;
@@ -56,6 +62,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       hasSession,
       sessionId,
       remoteMode,
+      profile,
+      contextUsage,
       readiness,
       onSubmit,
       onQuickAsk,
@@ -73,6 +81,20 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const slashMenuRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Voice input. We snapshot whatever was already typed when recording starts
+    // (`voiceBaseRef`), then rebuild the field as `base + livetranscript` on
+    // every result so the SpeechRecognition path streams in live. The recorder
+    // fallback delivers one final result on stop.
+    const voiceBaseRef = useRef("");
+    const handleVoiceResult = useCallback((text: string, isFinal: boolean) => {
+      const base = voiceBaseRef.current;
+      setInput(
+        base.trim() ? (text ? `${base.trimEnd()} ${text}` : base) : text,
+      );
+      if (isFinal) inputRef.current?.focus();
+    }, []);
+    const voice = useVoiceInput(handleVoiceResult, profile);
 
     const autoResize = useCallback((): void => {
       const el = inputRef.current;
@@ -439,6 +461,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             )}
           </div>
         )}
+        {voice.error && (
+          <div className="chat-attachment-error chat-voice-error" role="alert">
+            {voice.error}
+          </div>
+        )}
         <div className="chat-input-wrapper">
           <input
             ref={fileInputRef}
@@ -457,6 +484,35 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           >
             <Paperclip size={16} />
           </button>
+          {voice.supported && (
+            <button
+              className={`chat-mic-btn${
+                voice.recording ? " chat-mic-btn--recording" : ""
+              }`}
+              onClick={() => {
+                // Snapshot the current text so live results append to it.
+                if (!voice.recording && !voice.transcribing) {
+                  voiceBaseRef.current = input;
+                }
+                voice.toggle();
+              }}
+              disabled={voice.transcribing}
+              title={
+                voice.transcribing
+                  ? t("chat.voiceTranscribing")
+                  : voice.recording
+                    ? t("chat.voiceStop")
+                    : t("chat.voiceInput")
+              }
+              aria-label={
+                voice.recording ? t("chat.voiceStop") : t("chat.voiceInput")
+              }
+              aria-pressed={voice.recording}
+              type="button"
+            >
+              <Mic size={16} />
+            </button>
+          )}
           <textarea
             ref={inputRef}
             className="chat-input"
@@ -468,6 +524,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
             rows={1}
             autoFocus
           />
+          {contextUsage && contextUsage.used > 0 && (
+            <ContextGauge {...contextUsage} />
+          )}
           {isLoading ? (
             <button
               className="chat-send-btn chat-stop-btn"
