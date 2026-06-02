@@ -21,6 +21,7 @@
 - English: `README.md`
 - 简体中文: `README.zh-CN.md`
 - 日本語: `README.ja-JP.md`
+- 🌎 Español (LATAM): `README.es-LATAM.md`
 
 Hermes Desktop is a native desktop app for installing, configuring, and chatting with [Hermes Agent](https://github.com/NousResearch/hermes-agent) — a self-improving AI assistant with tool use, multi-platform messaging, and a closed learning loop.
 
