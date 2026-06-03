@@ -13,4 +13,6 @@ export default {
   kanban: "看板",
   gateway: "网关",
   settings: "设置",
+  collapseSidebar: "折叠侧边栏",
+  expandSidebar: "展开侧边栏",
 } as const;

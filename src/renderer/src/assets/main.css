@@ -912,16 +912,22 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-
+  transition:
+    width var(--transition),
+    padding var(--transition);
   border-radius: 16px;
+}
+
+.sidebar-collapsed .sidebar {
+  width: 64px;
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 20px 10px;
+  padding: 20px 14px 20px 20px;
   margin-top: 25px;
 }
 
@@ -935,6 +941,36 @@ body {
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
+}
+
+.sidebar-collapse-toggle {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.sidebar-collapse-toggle:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.sidebar-collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 18px 10px;
+  margin-top: 18px;
+}
+
+.sidebar-collapsed .sidebar-logo {
+  display: none;
 }
 
 .sidebar-brand-icon {
@@ -971,6 +1007,11 @@ body {
   overflow-y: auto;
 }
 
+.sidebar-collapsed .sidebar-nav {
+  padding: 0 10px;
+  align-items: center;
+}
+
 .sidebar-nav-item {
   display: flex;
   align-items: center;
@@ -989,6 +1030,12 @@ body {
   font-family: var(--font-sans);
 }
 
+.sidebar-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-nav-item:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -1003,6 +1050,18 @@ body {
   flex-shrink: 0;
 }
 
+.sidebar-collapsed .sidebar-nav-item {
+  width: 40px;
+  height: 40px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+.sidebar-collapsed .sidebar-nav-label {
+  display: none;
+}
+
 /* Sidebar footer with theme switcher */
 .sidebar-footer {
   padding: 12px;
@@ -1012,9 +1071,19 @@ body {
   gap: 8px;
 }
 
+.sidebar-collapsed .sidebar-footer {
+  align-items: center;
+  padding: 10px;
+}
+
 /* ── Profile switcher (sidebar footer) ──────────────────── */
 .profile-switcher {
   position: relative;
+  width: 100%;
+}
+
+.profile-switcher.compact {
+  width: 40px;
 }
 
 .profile-switcher-trigger {
@@ -1033,6 +1102,14 @@ body {
   cursor: pointer;
   text-align: left;
   transition: all var(--transition);
+}
+
+.profile-switcher.compact .profile-switcher-trigger {
+  width: 40px;
+  height: 40px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
 }
 
 .profile-switcher-trigger:hover,
@@ -1082,6 +1159,12 @@ body {
   padding: 6px;
   z-index: 200;
   animation: profileMenuIn 0.12s ease;
+}
+
+.profile-switcher.compact .profile-menu {
+  left: calc(100% + 8px);
+  right: auto;
+  bottom: 0;
 }
 
 @keyframes profileMenuIn {
@@ -1210,6 +1293,18 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: background var(--transition);
+}
+
+.sidebar-collapsed .sidebar-update-btn {
+  width: 40px;
+  height: 40px;
+  justify-content: center;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+.sidebar-collapsed .sidebar-update-btn span {
+  display: none;
 }
 
 .sidebar-update-btn:hover {

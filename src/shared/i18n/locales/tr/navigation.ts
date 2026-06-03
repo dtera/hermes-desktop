@@ -13,4 +13,6 @@ export default {
   kanban: "Kanban",
   gateway: "Gateway",
   settings: "Ayarlar",
+  collapseSidebar: "Collapse sidebar",
+  expandSidebar: "Expand sidebar",
 } as const;

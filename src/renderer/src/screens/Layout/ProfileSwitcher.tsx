@@ -18,6 +18,8 @@ interface ProfileSwitcherProps {
   onSwitch: (name: string) => void;
   /** Open the full Profiles management screen. */
   onManage: () => void;
+  /** Render as an icon-only sidebar footer affordance. */
+  compact?: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export default function ProfileSwitcher({
   activeProfile,
   onSwitch,
   onManage,
+  compact = false,
 }: ProfileSwitcherProps): React.JSX.Element {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -86,7 +89,10 @@ export default function ProfileSwitcher({
   }
 
   return (
-    <div className="profile-switcher" ref={rootRef}>
+    <div
+      className={`profile-switcher ${compact ? "compact" : ""}`}
+      ref={rootRef}
+    >
       {open && (
         <div className="profile-menu" role="menu">
           <div className="profile-menu-list">
@@ -146,7 +152,7 @@ export default function ProfileSwitcher({
       <button
         className={`profile-switcher-trigger ${open ? "open" : ""}`}
         onClick={() => setOpen((o) => !o)}
-        title={t("agents.switchProfile")}
+        title={`${t("agents.switchProfile")}: ${label}`}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -155,8 +161,10 @@ export default function ProfileSwitcher({
           className={`profile-icon ${activeRunning ? "running" : ""}`}
           aria-hidden
         />
-        <span className="profile-switcher-name">{label}</span>
-        <ChevronDown size={14} className="profile-switcher-chevron" />
+        {!compact && <span className="profile-switcher-name">{label}</span>}
+        {!compact && (
+          <ChevronDown size={14} className="profile-switcher-chevron" />
+        )}
       </button>
     </div>
   );

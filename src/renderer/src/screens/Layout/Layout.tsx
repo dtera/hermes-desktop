@@ -35,6 +35,8 @@ import {
   Timer,
   Kanban as KanbanIcon,
   Download,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "../../assets/icons";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
@@ -74,6 +76,8 @@ const NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [
   { view: "settings", icon: SettingsIcon, labelKey: "navigation.settings" },
 ];
 
+const SIDEBAR_COLLAPSED_KEY = "hermes.sidebar.collapsed";
+
 interface LayoutProps {
   verifyWarning?: boolean;
   onReinstall?: () => void;
@@ -90,6 +94,13 @@ function Layout({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [activeProfile, setActiveProfile] = useState("default");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   // Tabs lazy-mount on first visit, then stay mounted (display:none toggle).
   // Keeps IPC refetch / DOM rebuild off the tab-switch hot path.
   const [visitedViews, setVisitedViews] = useState<Set<View>>(
@@ -189,6 +200,18 @@ function Layout({
     }
   }
 
+  const updateButtonTitle =
+    updateError ??
+    (updateState === "available"
+      ? t("common.updateAvailable", { version: updateVersion })
+      : updateState === "downloading"
+        ? t("common.downloading", { percent: downloadPercent })
+        : updateState === "ready"
+          ? t("common.restartToUpdate")
+          : updateState === "error"
+            ? t("common.updateFailed")
+            : undefined);
+
   const handleNewChat = useCallback(() => {
     // Abort any in-flight chat before clearing
     window.hermesAPI.abortChat();
@@ -229,8 +252,24 @@ function Layout({
     [goTo],
   );
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      } catch {
+        /* ignore persistence failures */
+      }
+      return next;
+    });
+  }, []);
+
+  const sidebarToggleLabel = sidebarCollapsed
+    ? t("navigation.expandSidebar")
+    : t("navigation.collapseSidebar");
+
   return (
-    <div className="layout">
+    <div className={`layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span
@@ -242,6 +281,20 @@ function Layout({
               WebkitMaskImage: `url(${hermeslogo})`,
             }}
           />
+          <button
+            className="sidebar-collapse-toggle"
+            type="button"
+            onClick={toggleSidebar}
+            title={sidebarToggleLabel}
+            aria-label={sidebarToggleLabel}
+            aria-expanded={!sidebarCollapsed}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={16} />
+            ) : (
+              <PanelLeftClose size={16} />
+            )}
+          </button>
         </div>
 
         <nav className="sidebar-nav">
@@ -250,9 +303,11 @@ function Layout({
               key={v}
               className={`sidebar-nav-item ${view === v ? "active" : ""}`}
               onClick={() => goTo(v)}
+              title={t(labelKey)}
+              aria-label={t(labelKey)}
             >
               <Icon size={16} />
-              {t(labelKey)}
+              <span className="sidebar-nav-label">{t(labelKey)}</span>
             </button>
           ))}
         </nav>
@@ -265,7 +320,8 @@ function Layout({
               }`}
               onClick={handleUpdate}
               disabled={updateState === "downloading"}
-              title={updateError ?? undefined}
+              title={updateButtonTitle}
+              aria-label={updateButtonTitle}
             >
               <Download size={13} />
               {updateState === "available" && (
@@ -290,6 +346,7 @@ function Layout({
             activeProfile={activeProfile}
             onSwitch={handleSelectProfile}
             onManage={() => goTo("agents")}
+            compact={sidebarCollapsed}
           />
         </div>
       </aside>
