@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Crown, RefreshCw, Users, X } from "lucide-react";
 import { useI18n } from "../../components/useI18n";
+import oneChatIcon from "../../assets/images/one-chat.svg";
+import OneChatModal from "./OneChatModal";
 import Office3D from "./office3d/Office3D";
 import { profilesToOfficeAgents } from "./office3d/agents";
 import type { OfficeAgent } from "./office3d/core/types";
@@ -32,6 +34,7 @@ function Office({ visible }: OfficeProps): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [ceoId, setCeoId] = useState<string | null>(readStoredCeo);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const setCeo = useCallback((id: string | null) => {
     setCeoId(id);
@@ -218,6 +221,24 @@ function Office({ visible }: OfficeProps): React.JSX.Element {
           agents={positionedAgents}
           selectedId={selectedId}
           onSelectAgent={setSelectedId}
+        />
+
+        <button
+          type="button"
+          onClick={() => setChatOpen(true)}
+          className="absolute bottom-5 right-5 w-[120px] h-11 rounded-lg border-none bg-black cursor-pointer flex items-center justify-center px-3 gap-2 z-10"
+        >
+          <img
+            src={oneChatIcon}
+            alt="Chat"
+            className="h-6 brightness-0 invert"
+          />
+        </button>
+
+        <OneChatModal
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          agents={positionedAgents}
         />
 
         {selectedAgent && (

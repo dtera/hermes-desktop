@@ -48,9 +48,9 @@ function hashName(name: string): number {
 export function profileToOfficeAgent(profile: OfficeProfileInput): OfficeAgent {
   const seed = profile.name || "agent";
   const color = AGENT_COLORS[hashName(seed) % AGENT_COLORS.length];
-  // Derive the id from the profile's unique path (display names can collide);
-  // colour/avatar still seed off the name so they stay visually stable.
-  const id = profile.path || seed;
+  // Use profile name as the stable id — it is unique within the system and
+  // is the valid identifier for gateway API calls.
+  const id = profile.name;
   return {
     id,
     name: profile.name,
