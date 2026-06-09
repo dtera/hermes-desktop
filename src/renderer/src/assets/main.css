@@ -6947,6 +6947,9 @@ body {
 }
 
 .discover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-shrink: 0;
 }
 
@@ -8900,7 +8903,7 @@ body {
 }
 
 .models-registry-modal {
-  width: 70vw;
+  width: 70vw !important;
   max-width: none;
 }
 
@@ -8911,7 +8914,7 @@ body {
 
 .registry-model-list {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
 
@@ -8940,12 +8943,6 @@ body {
   background: var(--bg-tertiary);
   padding: 2px 8px;
   border-radius: 10px;
-}
-
-.registry-model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .registry-model-row {
@@ -9031,6 +9028,12 @@ body {
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
+}
+
+.models-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .models-modal-title {

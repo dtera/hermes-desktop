@@ -21,6 +21,7 @@ import {
   Pencil,
   Sparkles,
   Check,
+  ExternalLink,
 } from "../../assets/icons";
 import { LOCAL_PRESETS, PROVIDERS } from "../../constants";
 import { useI18n } from "../../components/useI18n";
@@ -494,6 +495,16 @@ function Models({ visible }: ModelsProps = {}): React.JSX.Element {
         </div>
         {activeTab === "models" && (
           <div className="models-header-actions">
+            <a
+              href="https://github.com/fathah/hermes-registry"
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-secondary btn-sm"
+              title="Open Registry on GitHub"
+            >
+              <ExternalLink size={14} />
+              Open Registry
+            </a>
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => openRegistry()}

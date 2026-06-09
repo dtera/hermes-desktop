@@ -25,7 +25,7 @@ export default {
   apiKeyHint:
     "Stored as an environment variable. Picks the matching env key based on the URL, or CUSTOM_API_KEY otherwise.",
   allProviders: "All",
-  browseRegistry: "Browse Registry",
+  browseRegistry: "Browse Models",
   registryTitle: "Model Registry",
   registrySearchPlaceholder: "Search providers and models...",
   registryAddButton: "Add",
