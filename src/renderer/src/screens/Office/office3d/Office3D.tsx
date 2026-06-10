@@ -4,6 +4,7 @@ import {
   OrbitControls,
   Environment,
   Lightformer,
+  Sky,
   useGLTF,
   useTexture,
 } from "@react-three/drei";
@@ -16,6 +17,12 @@ import atmGlbUrl from "./assets/atm.glb?url";
 import sofaGlbUrl from "./assets/loungeSofa.glb?url";
 import sofaChairGlbUrl from "./assets/sofa_chair.glb?url";
 import manGlbUrl from "./assets/man.glb?url";
+import treeGlbUrl from "./assets/tree.glb?url";
+import car1GlbUrl from "./assets/car1.glb?url";
+import car2GlbUrl from "./assets/car2.glb?url";
+import truck1GlbUrl from "./assets/truck1.glb?url";
+import streetLightGlbUrl from "./assets/street-light.glb?url";
+import trafficLightGlbUrl from "./assets/traffic-light.glb?url";
 import baseBankLogoUrl from "./assets/images/base-bank.webp";
 import hermesHqLogoUrl from "./assets/images/hermes-one-hq.webp";
 import { Workstations, FurniturePieces } from "./objects/furniture";
@@ -80,9 +87,6 @@ const DAY_PALETTE: WorldPalette = {
   envIntensity: 0.75,
   keyColor: "#fff4e2",
 };
-
-// Only the canvas background follows the app's light/dark theme.
-const THEME_BACKGROUND = { light: "#f3f1ec", dark: "#16181d" } as const;
 
 type ControllerMode = "toSeat" | "seated";
 interface ControllerState {
@@ -325,6 +329,38 @@ const BANK_WALL_T = 0.25;
 const BANK_STREET_GAP = 4.0;
 // Z centre of the bank building (north of the office)
 const BANK_Z = -(WORLD_H / 2 + BANK_STREET_GAP + BANK_D / 2);
+
+// ── Backdrop roads (shared by CityBackdrop + TrafficLayer) ────────────────
+const ROAD_SOUTH_Z = WORLD_H / 2 + 4.5; // E-W road in front of office
+const ROAD_NORTH_Z = BANK_Z - BANK_D / 2 - 5; // E-W road behind bank
+const ROAD_EAST_X = WORLD_W / 2 + 4.5; // N-S roads, east / west (mirrored)
+const ROAD_WIDTH = 5.5;
+const ROAD_LEN = 110;
+// Outer ring spacing — a second set of roads one city block further out, so
+// the grid reads as a district rather than a single block.
+const ROAD_OUTER_GAP = 27;
+// Decal stacking heights above the ground plane (y = -0.02). Generous gaps —
+// anything tighter z-fights at far camera distances.
+const ROAD_Y = 0.01;
+const ROAD_MARKING_Y = 0.03;
+
+interface RoadDef {
+  /** Axis the road runs along ("x" = E-W, "z" = N-S). */
+  axis: "x" | "z";
+  /** The fixed cross-axis coordinate of the road's centre line. */
+  center: number;
+}
+
+const ROADS: RoadDef[] = [
+  { axis: "x", center: ROAD_SOUTH_Z },
+  { axis: "x", center: ROAD_NORTH_Z },
+  { axis: "x", center: ROAD_SOUTH_Z + ROAD_OUTER_GAP },
+  { axis: "x", center: ROAD_NORTH_Z - ROAD_OUTER_GAP },
+  { axis: "z", center: ROAD_EAST_X },
+  { axis: "z", center: -ROAD_EAST_X },
+  { axis: "z", center: ROAD_EAST_X + ROAD_OUTER_GAP },
+  { axis: "z", center: -ROAD_EAST_X - ROAD_OUTER_GAP },
+];
 
 const BANK_PALETTE = {
   floor: "#d4c8b8",
@@ -730,30 +766,57 @@ function BankFakePeople({ count }: { count: number }): React.JSX.Element {
 /** Street / walkway connecting office south-exit to bank north-entry. */
 function ConnectingStreet(): React.JSX.Element {
   const streetZ = -(WORLD_H / 2 + BANK_STREET_GAP / 2);
-  const markingZ = streetZ;
+  const roadW = BANK_W; // full width of the gap
+  const roadD = BANK_STREET_GAP;
+  const kerbD = 0.6;
+  const dashLen = 1.8;
+  const dashGap = 1.4;
+  const dashCount = Math.floor(roadW / (dashLen + dashGap));
   return (
     <group>
-      {/* Pavement strip between the two buildings */}
+      {/* Road surface */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0, streetZ]}
+        position={[0, ROAD_Y, streetZ]}
         receiveShadow
       >
-        <planeGeometry args={[BANK_W, BANK_STREET_GAP]} />
+        <planeGeometry args={[roadW, roadD]} />
+        <meshStandardMaterial color="#4a4e57" roughness={0.95} />
+      </mesh>
+      {/* Kerb — office side */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, ROAD_MARKING_Y, -(WORLD_H / 2) + kerbD / 2]}
+      >
+        <planeGeometry args={[roadW, kerbD]} />
         <meshStandardMaterial color="#c0c5cd" roughness={0.88} />
       </mesh>
-      {/* Dashed centre line */}
-      {[-3, -1, 1, 3].map((i) => (
-        <mesh
-          key={`dash-${i}`}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[i * 2, 0.01, markingZ]}
-          receiveShadow
-        >
-          <planeGeometry args={[1.2, 0.18]} />
-          <meshStandardMaterial color="#fff" roughness={0.9} />
-        </mesh>
-      ))}
+      {/* Kerb — bank side */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[
+          0,
+          ROAD_MARKING_Y,
+          streetZ - roadD / 2 + kerbD / 2 + BANK_STREET_GAP / 2,
+        ]}
+      >
+        <planeGeometry args={[roadW, kerbD]} />
+        <meshStandardMaterial color="#c0c5cd" roughness={0.88} />
+      </mesh>
+      {/* White centre dashes running E-W */}
+      {Array.from({ length: dashCount }, (_, i) => {
+        const ox = -roadW / 2 + i * (dashLen + dashGap) + dashLen / 2;
+        return (
+          <mesh
+            key={`cs-dash-${i}`}
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[ox, ROAD_MARKING_Y, streetZ]}
+          >
+            <planeGeometry args={[dashLen, 0.18]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.9} />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
@@ -773,6 +836,70 @@ function BankSection(): React.JSX.Element {
   );
 }
 
+function TreeGlb({
+  x,
+  z,
+  h,
+}: {
+  x: number;
+  z: number;
+  h: number;
+}): React.JSX.Element {
+  const { scene } = useGLTF(treeGlbUrl, false, false);
+  const object = useMemo(() => glbClone(scene, null), [scene]);
+  const s = h * 0.28;
+  return (
+    <group position={[x, 0, z]} scale={[s, s, s]}>
+      <primitive object={object} />
+    </group>
+  );
+}
+
+function StreetLightGlb({
+  x,
+  z,
+  rotY = 0,
+}: {
+  x: number;
+  z: number;
+  rotY?: number;
+}): React.JSX.Element {
+  const { scene } = useGLTF(streetLightGlbUrl, false, false);
+  const object = useMemo(() => glbClone(scene, null), [scene]);
+  return (
+    <group position={[x, 0, z]} rotation={[0, rotY, 0]} scale={[0.8, 0.8, 0.8]}>
+      <primitive object={object} />
+    </group>
+  );
+}
+
+function TrafficLightGlb({
+  x,
+  z,
+  rotY = 0,
+}: {
+  x: number;
+  z: number;
+  rotY?: number;
+}): React.JSX.Element {
+  const { scene } = useGLTF(trafficLightGlbUrl, false, false);
+  const object = useMemo(() => glbClone(scene, null), [scene]);
+  return (
+    <group position={[x, 0, z]} rotation={[0, rotY, 0]} scale={[1.6, 1.6, 1.6]}>
+      <primitive object={object} />
+    </group>
+  );
+}
+
+// Cell centres kept building-free because the towers the grid rolled there
+// blocked the default camera's view: one wedged in the gap between the office
+// and bank lots, one right in front of the office entrance. Coordinates match
+// the CityBackdrop grid (cell 5.0, 20×20).
+const VIEW_BLOCKER_SPOTS: Array<[number, number]> = [
+  [-12.5, -17.5],
+  [-7.5, 27.5],
+];
+
 /** Sparse city backdrop — a few buildings north/west/east, trees south. */
 function CityBackdrop(): React.JSX.Element {
   const { buildings, trees } = useMemo(() => {
@@ -791,9 +918,9 @@ function CityBackdrop(): React.JSX.Element {
       return x - Math.floor(x);
     };
 
-    const cell = 4.5;
-    const rows = 14;
-    const cols = 10;
+    const cell = 5.0;
+    const rows = 20;
+    const cols = 20;
     const margin = 2.5;
     const officeW = WORLD_W + margin;
     const officeH = WORLD_H + margin;
@@ -802,6 +929,7 @@ function CityBackdrop(): React.JSX.Element {
     const bankMaxZ = BANK_Z + BANK_D / 2 + margin;
     const bankMinX = -BANK_W / 2 - margin;
     const bankMaxX = BANK_W / 2 + margin;
+    const rW = ROAD_WIDTH / 2 + 1.5; // half-width + building clearance
 
     for (let ix = 0; ix < cols; ix++) {
       for (let iz = 0; iz < rows; iz++) {
@@ -823,24 +951,49 @@ function CityBackdrop(): React.JSX.Element {
           continue;
         }
 
-        // No buildings on the south (camera-facing) side — use trees instead
-        if (z > officeH / 2) {
-          const seed = ix * 100 + iz;
-          if (rng(seed) < 0.25) {
-            trees.push({
-              x: x + (rng(seed + 1) - 0.5) * cell * 0.6,
-              z: z + (rng(seed + 2) - 0.5) * cell * 0.6,
-              h: 1.2 + rng(seed + 3) * 1.5,
-            });
-          }
+        // Curated view-corridor cells (see VIEW_BLOCKER_SPOTS)
+        if (
+          VIEW_BLOCKER_SPOTS.some(
+            ([bx, bz]) =>
+              Math.abs(x - bx) < cell / 2 && Math.abs(z - bz) < cell / 2,
+          )
+        ) {
           continue;
         }
 
+        // Keep every road clear, plus the office↔bank connecting street
+        const rConnZ = -(WORLD_H / 2 + BANK_STREET_GAP / 2);
+        if (
+          ROADS.some((r) =>
+            r.axis === "x"
+              ? Math.abs(z - r.center) < rW
+              : Math.abs(x - r.center) < rW,
+          )
+        )
+          continue;
+        if (
+          z > rConnZ - BANK_STREET_GAP / 2 - 1 &&
+          z < rConnZ + BANK_STREET_GAP / 2 + 1 &&
+          x > -BANK_W / 2 - 1 &&
+          x < BANK_W / 2 + 1
+        )
+          continue;
+
         const seed = ix * 100 + iz;
-        if (rng(seed) < 0.35) {
-          const w = cell * (0.5 + rng(seed + 1) * 0.3);
-          const d = cell * (0.5 + rng(seed + 2) * 0.3);
-          const h = 3 + rng(seed + 3) * 10;
+        const roll = rng(seed);
+
+        if (roll < 0.15) {
+          // Random tree in any open cell
+          trees.push({
+            x: x + (rng(seed + 1) - 0.5) * cell * 0.5,
+            z: z + (rng(seed + 2) - 0.5) * cell * 0.5,
+            h: 1.2 + rng(seed + 3) * 1.6,
+          });
+        } else if (roll < 0.6) {
+          // Building
+          const w = cell * (0.7 + rng(seed + 1) * 0.5);
+          const d = cell * (0.7 + rng(seed + 2) * 0.5);
+          const h = 5 + rng(seed + 3) * 14;
           const lightness = 55 + rng(seed + 4) * 25;
           buildings.push({
             x,
@@ -851,52 +1004,400 @@ function CityBackdrop(): React.JSX.Element {
             color: `hsl(210, 8%, ${lightness}%)`,
           });
         }
+        // else: leave cell empty (pavement / gap)
       }
     }
     return { buildings, trees };
   }, []);
 
+  const roadSouthZ = ROAD_SOUTH_Z;
+  const roadNorthZ = ROAD_NORTH_Z;
+  const roadEastX = ROAD_EAST_X;
+  const roadWidth = ROAD_WIDTH;
+  const dashLen = 2.0;
+  const dashGap = 1.8;
+  const dashCount = Math.floor(ROAD_LEN / (dashLen + dashGap));
+
+  // Lamp spots along the inner roads, skipping any that land on a crossing.
+  const lampSpots = [-44, -33, -22, -11, 0, 11, 22, 33, 44];
+  const clearOfRoads = (o: number, crossAxis: "x" | "z"): boolean =>
+    ROADS.every(
+      (r) =>
+        r.axis !== crossAxis || Math.abs(o - r.center) > roadWidth / 2 + 1.2,
+    );
+  const lampXs = lampSpots.filter((o) => clearOfRoads(o, "z"));
+  const lampZs = lampSpots.filter((o) => clearOfRoads(o, "x"));
+
   return (
     <group>
-      {/* Street / pavement extending beyond both buildings */}
+      {/* Ground disc out to the horizon. Fog fades it into the sky long
+          before the rim is visible. */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, -0.02, 0]}
         receiveShadow
       >
-        <planeGeometry args={[80, 80]} />
+        <circleGeometry args={[380, 64]} />
         <meshStandardMaterial color="#b0b5bd" roughness={0.92} metalness={0} />
       </mesh>
-      {buildings.map((b, i) => (
+      {/* Road surfaces */}
+      {ROADS.map((road, i) => (
         <mesh
-          key={`b-${i}`}
-          position={[b.x, b.h / 2, b.z]}
-          castShadow
-          receiveShadow
+          key={`road-${i}`}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={
+            road.axis === "x"
+              ? [0, ROAD_Y, road.center]
+              : [road.center, ROAD_Y, 0]
+          }
         >
-          <boxGeometry args={[b.w, b.h, b.d]} />
-          <meshStandardMaterial
-            color={b.color}
-            roughness={0.88}
-            metalness={0.04}
+          <planeGeometry
+            args={
+              road.axis === "x" ? [ROAD_LEN, roadWidth] : [roadWidth, ROAD_LEN]
+            }
           />
+          <meshStandardMaterial color="#4a4e57" roughness={0.95} />
         </mesh>
       ))}
-      {trees.map((t, i) => (
-        <group key={`t-${i}`} position={[t.x, 0, t.z]}>
-          {/* Trunk */}
-          <mesh position={[0, t.h * 0.25, 0]} castShadow>
-            <cylinderGeometry args={[0.06, 0.09, t.h * 0.5, 6]} />
-            <meshStandardMaterial color="#8b6f47" roughness={0.95} />
-          </mesh>
-          {/* Canopy */}
-          <mesh position={[0, t.h * 0.65, 0]} castShadow>
-            <coneGeometry args={[t.h * 0.35, t.h * 0.7, 7]} />
-            <meshStandardMaterial color="#4a7c59" roughness={0.9} />
-          </mesh>
-        </group>
-      ))}
+      {/* Centre dashes */}
+      {ROADS.map((road, i) =>
+        Array.from({ length: dashCount }, (_, j) => {
+          const o = -ROAD_LEN / 2 + j * (dashLen + dashGap) + dashLen / 2;
+          return (
+            <mesh
+              key={`dash-${i}-${j}`}
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={
+                road.axis === "x"
+                  ? [o, ROAD_MARKING_Y, road.center]
+                  : [road.center, ROAD_MARKING_Y, o]
+              }
+            >
+              <planeGeometry
+                args={road.axis === "x" ? [dashLen, 0.18] : [0.18, dashLen]}
+              />
+              <meshStandardMaterial color="#f5e642" roughness={0.9} />
+            </mesh>
+          );
+        }),
+      )}
+      {buildings.map((b, i) => {
+        const winCols = Math.max(1, Math.floor(b.w / 1.1));
+        const winRows = Math.max(1, Math.floor(b.h / 1.4));
+        const winW = 0.55;
+        const winH = 0.65;
+        const winSpacingX = b.w / winCols;
+        const winSpacingY = b.h / (winRows + 1);
+        // Individual window planes are only worth their draw calls up close;
+        // far buildings are fog-hazed anyway and the expanded grid would
+        // otherwise add thousands of meshes.
+        const showWindows = Math.hypot(b.x, b.z) < 55;
+        return (
+          <group key={`b-${i}`}>
+            <mesh position={[b.x, b.h / 2, b.z]} castShadow receiveShadow>
+              <boxGeometry args={[b.w, b.h, b.d]} />
+              <meshStandardMaterial
+                color={b.color}
+                roughness={0.88}
+                metalness={0.04}
+              />
+            </mesh>
+            {/* Windows on south face */}
+            {showWindows &&
+              Array.from({ length: winCols }, (_, cx) =>
+                Array.from({ length: winRows }, (_, ry) => (
+                  <mesh
+                    key={`w-s-${i}-${cx}-${ry}`}
+                    position={[
+                      b.x - b.w / 2 + (cx + 0.5) * winSpacingX,
+                      (ry + 1) * winSpacingY,
+                      b.z + b.d / 2 + 0.02,
+                    ]}
+                  >
+                    <planeGeometry args={[winW, winH]} />
+                    <meshStandardMaterial
+                      color="#a8d8f0"
+                      emissive="#88c8f0"
+                      emissiveIntensity={0.4}
+                      roughness={0.1}
+                      metalness={0.3}
+                    />
+                  </mesh>
+                )),
+              )}
+            {/* Windows on north face */}
+            {showWindows &&
+              Array.from({ length: winCols }, (_, cx) =>
+                Array.from({ length: winRows }, (_, ry) => (
+                  <mesh
+                    key={`w-n-${i}-${cx}-${ry}`}
+                    position={[
+                      b.x - b.w / 2 + (cx + 0.5) * winSpacingX,
+                      (ry + 1) * winSpacingY,
+                      b.z - b.d / 2 - 0.02,
+                    ]}
+                    rotation={[0, Math.PI, 0]}
+                  >
+                    <planeGeometry args={[winW, winH]} />
+                    <meshStandardMaterial
+                      color="#a8d8f0"
+                      emissive="#88c8f0"
+                      emissiveIntensity={0.4}
+                      roughness={0.1}
+                      metalness={0.3}
+                    />
+                  </mesh>
+                )),
+              )}
+          </group>
+        );
+      })}
+      <Suspense fallback={null}>
+        {trees.map((t, i) => (
+          <TreeGlb key={`t-${i}`} x={t.x} z={t.z} h={t.h} />
+        ))}
+        {/* Traffic lights at the 4 road intersections */}
+        <TrafficLightGlb
+          x={roadEastX - roadWidth / 2 - 0.6}
+          z={roadSouthZ - roadWidth / 2 - 0.6}
+          rotY={Math.PI}
+        />
+        <TrafficLightGlb
+          x={-roadEastX + roadWidth / 2 + 0.6}
+          z={roadSouthZ - roadWidth / 2 - 0.6}
+          rotY={0}
+        />
+        <TrafficLightGlb
+          x={roadEastX - roadWidth / 2 - 0.6}
+          z={roadNorthZ + roadWidth / 2 + 0.6}
+          rotY={Math.PI}
+        />
+        <TrafficLightGlb
+          x={-roadEastX + roadWidth / 2 + 0.6}
+          z={roadNorthZ + roadWidth / 2 + 0.6}
+          rotY={0}
+        />
+        {/* Street lights along E-W south road — both sides */}
+        {lampXs.map((ox) => (
+          <StreetLightGlb
+            key={`sl-ews-n-${ox}`}
+            x={ox}
+            z={roadSouthZ - roadWidth / 2 - 1.0}
+            rotY={0}
+          />
+        ))}
+        {lampXs.map((ox) => (
+          <StreetLightGlb
+            key={`sl-ews-s-${ox}`}
+            x={ox}
+            z={roadSouthZ + roadWidth / 2 + 1.0}
+            rotY={Math.PI}
+          />
+        ))}
+        {/* Street lights along N-S east road */}
+        {lampZs.map((oz) => (
+          <StreetLightGlb
+            key={`sl-nse-w-${oz}`}
+            x={roadEastX - roadWidth / 2 - 1.0}
+            z={oz}
+            rotY={Math.PI / 2}
+          />
+        ))}
+        {/* Street lights along N-S west road */}
+        {lampZs.map((oz) => (
+          <StreetLightGlb
+            key={`sl-nsw-e-${oz}`}
+            x={-roadEastX + roadWidth / 2 + 1.0}
+            z={oz}
+            rotY={-Math.PI / 2}
+          />
+        ))}
+      </Suspense>
     </group>
+  );
+}
+
+// ── Traffic — cars / trucks looping on the backdrop roads ─────────────────
+
+const VEHICLE_TINTS = [
+  "#b03a2e", // red
+  "#1f618d", // blue
+  "#239b56", // green
+  "#d4ac0d", // yellow
+  "#6c3483", // purple
+  "#ca6f1e", // orange
+  "#e8e8e8", // white
+  "#39414f", // gunmetal
+];
+
+/**
+ * Like glbClone, but only repaints plausible body panels: dark materials
+ * (tyres, glass, grilles) keep their colour so tint variants don't become
+ * single-colour blobs. Slightly glossier than furniture for a car-paint look.
+ */
+function vehicleClone(scene: THREE.Object3D, tint: string): THREE.Object3D {
+  const tintColor = new THREE.Color(tint);
+  const hsl = { h: 0, s: 0, l: 0 };
+  const copy = scene.clone(true);
+  copy.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = true;
+    const isArray = Array.isArray(mesh.material);
+    const mats = isArray
+      ? (mesh.material as THREE.Material[])
+      : [mesh.material as THREE.Material];
+    const converted = mats.map((m) => {
+      const src = m as THREE.Material & {
+        color?: THREE.Color;
+        map?: THREE.Texture | null;
+      };
+      const lit = new THREE.MeshStandardMaterial({
+        color: src.color ? src.color.clone() : new THREE.Color("#ffffff"),
+        map: src.map ?? null,
+        roughness: 0.45,
+        metalness: 0.15,
+        envMapIntensity: 0.9,
+      });
+      lit.color.getHSL(hsl);
+      if (hsl.l > 0.22) lit.color.lerp(tintColor, 0.8);
+      return lit;
+    });
+    mesh.material = isArray ? converted : converted[0];
+  });
+  return copy;
+}
+
+interface TrafficVehicle {
+  url: string;
+  tint: string;
+  /** Footprint length in world units after normalisation. */
+  targetLen: number;
+  /** Axis the vehicle travels along ("x" = E-W roads, "z" = N-S roads). */
+  axis: "x" | "z";
+  /** Fixed cross-axis coordinate — road centre plus its lane offset. */
+  fixed: number;
+  dir: 1 | -1;
+  speed: number;
+  /** Start position along the road in [-ROAD_LEN/2, ROAD_LEN/2]. */
+  startS: number;
+}
+
+function makeTraffic(): TrafficVehicle[] {
+  const rng = (seed: number): number => {
+    const v = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+    return v - Math.floor(v);
+  };
+  const lane = ROAD_WIDTH / 4; // centre of each carriageway half
+  const vehicles: TrafficVehicle[] = [];
+  let seed = 0;
+  for (const road of ROADS) {
+    const perRoad = 3;
+    for (let i = 0; i < perRoad; i++) {
+      seed += 1;
+      const dir: 1 | -1 = i % 2 === 0 ? 1 : -1;
+      const roll = rng(seed * 7 + 1);
+      const isTruck = roll > 0.78;
+      const url = isTruck
+        ? truck1GlbUrl
+        : roll > 0.39
+          ? car2GlbUrl
+          : car1GlbUrl;
+      vehicles.push({
+        url,
+        tint: VEHICLE_TINTS[
+          Math.floor(rng(seed * 11 + 2) * VEHICLE_TINTS.length)
+        ],
+        targetLen: isTruck ? 3.4 : 2.3,
+        axis: road.axis,
+        // Two-way traffic: each direction drives in its own lane.
+        fixed: road.center + dir * lane,
+        dir,
+        speed: (isTruck ? 3.2 : 4.5) + rng(seed * 13 + 3) * 2.2,
+        startS:
+          -ROAD_LEN / 2 + ((i + rng(seed * 17 + 4) * 0.6) / perRoad) * ROAD_LEN,
+      });
+    }
+  }
+  return vehicles;
+}
+
+function VehicleModel({
+  url,
+  tint,
+  targetLen,
+}: {
+  url: string;
+  tint: string;
+  targetLen: number;
+}): React.JSX.Element {
+  const { scene } = useGLTF(url, false, false);
+  const object = useMemo(() => {
+    const obj = vehicleClone(scene, tint);
+    const bbox = new THREE.Box3().setFromObject(obj);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    bbox.getSize(size);
+    bbox.getCenter(center);
+    // Recentre so the wheels sit at y=0 and the body rotates about its middle.
+    obj.position.set(-center.x, -bbox.min.y, -center.z);
+    const root = new THREE.Group();
+    root.add(obj);
+    // Align the model's long axis with +Z (direction of travel) and normalise
+    // its footprint to the target length.
+    if (size.x > size.z) root.rotation.y = Math.PI / 2;
+    const len = Math.max(size.x, size.z);
+    root.scale.setScalar(len > 0 ? targetLen / len : 1);
+    return root;
+  }, [scene, tint, targetLen]);
+  return <primitive object={object} />;
+}
+
+function TrafficVehicleInstance({
+  vehicle,
+}: {
+  vehicle: TrafficVehicle;
+}): React.JSX.Element {
+  const groupRef = useRef<THREE.Group>(null);
+  // Live position along the road; kept in a ref so the per-frame update
+  // doesn't mutate the (config-only) vehicle prop.
+  const sRef = useRef(vehicle.startS);
+  useFrame((_, delta) => {
+    const g = groupRef.current;
+    if (!g) return;
+    const step = Math.min(delta, 0.05);
+    let s = sRef.current + vehicle.dir * vehicle.speed * step;
+    const half = ROAD_LEN / 2;
+    if (s > half) s -= ROAD_LEN;
+    else if (s < -half) s += ROAD_LEN;
+    sRef.current = s;
+    if (vehicle.axis === "x") {
+      g.position.set(s, ROAD_Y, vehicle.fixed);
+      g.rotation.y = vehicle.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else {
+      g.position.set(vehicle.fixed, ROAD_Y, s);
+      g.rotation.y = vehicle.dir > 0 ? 0 : Math.PI;
+    }
+  });
+  return (
+    <group ref={groupRef}>
+      <VehicleModel
+        url={vehicle.url}
+        tint={vehicle.tint}
+        targetLen={vehicle.targetLen}
+      />
+    </group>
+  );
+}
+
+function TrafficLayer(): React.JSX.Element {
+  const vehicles = useRef<TrafficVehicle[]>(makeTraffic());
+  return (
+    <>
+      {vehicles.current.map((v, i) => (
+        <TrafficVehicleInstance key={`veh-${i}`} vehicle={v} />
+      ))}
+    </>
   );
 }
 
@@ -1064,6 +1565,63 @@ function InteriorWalls({
  * separately-cloned hermes-office dev server. Each agent corresponds to a
  * desktop profile.
  */
+
+/**
+ * Distant low-poly skyline ring — silhouette towers scattered in a wide band
+ * outside the detailed backdrop lot, so the horizon reads as a city that keeps
+ * going (GTA-style layering: crisp lot → hazy mid-distance towers → skydome
+ * panorama). One instanced draw call; fog does the atmospheric blending.
+ */
+const SKYLINE_COUNT = 110;
+const SKYLINE_UP = new THREE.Vector3(0, 1, 0);
+
+function DistantSkyline(): React.JSX.Element {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const rng = (seed: number): number => {
+      const v = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    const matrix = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    const color = new THREE.Color();
+    for (let i = 0; i < SKYLINE_COUNT; i++) {
+      const angle = rng(i * 3 + 1) * Math.PI * 2;
+      // Bias towards the outer edge so towers stack into a skyline wall.
+      const radius = 75 + Math.pow(rng(i * 3 + 2), 0.7) * 190;
+      const w = 5 + rng(i * 3 + 3) * 12;
+      const d = 5 + rng(i * 5 + 4) * 12;
+      // Further rings grow taller so they stay visible over nearer ones.
+      const h = 8 + rng(i * 7 + 5) * 28 + (radius - 75) * 0.12;
+      quat.setFromAxisAngle(SKYLINE_UP, rng(i * 11 + 6) * Math.PI);
+      pos.set(Math.cos(angle) * radius, h / 2 - 0.1, Math.sin(angle) * radius);
+      scl.set(w, h, d);
+      matrix.compose(pos, quat, scl);
+      mesh.setMatrixAt(i, matrix);
+      color.setHSL(215 / 360, 0.1, 0.36 + rng(i * 13 + 7) * 0.22);
+      mesh.setColorAt(i, color);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, []);
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, SKYLINE_COUNT]}
+      frustumCulled={false}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial roughness={0.95} metalness={0.05} />
+    </instancedMesh>
+  );
+}
+
 export default function Office3D({
   agents,
   selectedId,
@@ -1100,7 +1658,10 @@ export default function Office3D({
     <Canvas
       shadows="percentage"
       dpr={[1, 2]}
-      camera={{ position: [0, 38, 48], fov: 50 }}
+      // near=1 (instead of the 0.1 default) gives the depth buffer ~10× more
+      // precision at distance — without it the road decals z-fight the ground
+      // plane into flickering stripes when viewed from far away.
+      camera={{ position: [0, 38, 48], fov: 50, near: 1, far: 1000 }}
       gl={{
         antialias: true,
         toneMapping: THREE.ACESFilmicToneMapping,
@@ -1109,7 +1670,19 @@ export default function Office3D({
       onPointerMissed={() => onSelectAgent(null)}
       style={{ width: "100%", height: "100%" }}
     >
-      <color attach="background" args={[THEME_BACKGROUND.light]} />
+      {/* Procedural day-sky gradient (Preetham atmosphere) — replaces the old
+          photo skydome. Sun direction matches the key light so sky brightness
+          and shadows agree. Sky ignores fog by design. */}
+      <Sky
+        distance={400}
+        sunPosition={[14, 36, 16]}
+        turbidity={4}
+        rayleigh={0.5}
+      />
+      {/* Light aerial haze matched to the sky's horizon band, so distant
+          ground and the skyline ring dissolve into the sky instead of
+          ending at a hard edge. */}
+      <fog attach="fog" args={["#d6dde5", 70, 280]} />
       {/* Soft image-based lighting baked once from in-scene Lightformers — no
           external HDRI fetch, so it stays within the renderer's strict CSP. */}
       <Environment frames={1} resolution={256} background={false}>
@@ -1169,7 +1742,11 @@ export default function Office3D({
         shadow-camera-top={36}
         shadow-camera-bottom={-36}
       />
+      <DistantSkyline />
       <CityBackdrop />
+      <Suspense fallback={null}>
+        <TrafficLayer />
+      </Suspense>
       <ConnectingStreet />
       <Room palette={palette} />
       <InteriorWalls palette={palette} />
@@ -1189,7 +1766,7 @@ export default function Office3D({
         makeDefault
         enablePan
         minDistance={8}
-        maxDistance={80}
+        maxDistance={130}
         maxPolarAngle={Math.PI / 2.15}
         target={new THREE.Vector3(0, 0, BANK_Z / 2)}
       />
@@ -1201,3 +1778,9 @@ useGLTF.preload(atmGlbUrl, false, false);
 useGLTF.preload(sofaGlbUrl, false, false);
 useGLTF.preload(sofaChairGlbUrl, false, false);
 useGLTF.preload(manGlbUrl);
+useGLTF.preload(treeGlbUrl, false, false);
+useGLTF.preload(car1GlbUrl, false, false);
+useGLTF.preload(car2GlbUrl, false, false);
+useGLTF.preload(truck1GlbUrl, false, false);
+useGLTF.preload(streetLightGlbUrl, false, false);
+useGLTF.preload(trafficLightGlbUrl, false, false);
