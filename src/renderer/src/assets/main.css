@@ -3059,8 +3059,8 @@ body {
 }
 
 .chat-queue-single {
-  display: inline-block;
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3101,14 +3101,41 @@ body {
 }
 
 .chat-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   max-width: 100%;
   padding: 3px 8px;
   border-radius: var(--radius-sm, 6px);
   background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
   color: var(--text-secondary);
+}
+
+.chat-queue-item-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-queue-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.chat-queue-remove:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
 }
 
 /* Input area */
