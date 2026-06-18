@@ -2807,7 +2807,7 @@ app.whenReady().then(() => {
         "script-src 'self' 'wasm-unsafe-eval' https://*.posthog.com https://*.i.posthog.com; " +
         "style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data: blob:; " +
-        "connect-src 'self' blob: https://*.posthog.com https://*.i.posthog.com; " +
+        "connect-src 'self' blob: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://*.posthog.com https://*.i.posthog.com; " +
         "media-src 'self' blob:";
       callback({
         responseHeaders: {
