@@ -24,6 +24,7 @@ import { ensureSshTunnel, getSshTunnelUrl } from "./ssh-tunnel";
 import {
   sshGatewayStatus,
   sshReadRemoteApiKey,
+  sshResolveApiServerPort,
   sshStartGateway,
 } from "./ssh-remote";
 import {
@@ -135,11 +136,12 @@ async function sshDashboardConnectionFromConfig(
 
   await ensureSshDashboardCompatibility(config.ssh);
 
-  if (!(await sshGatewayStatus(config.ssh))) {
-    await sshStartGateway(config.ssh);
+  if (!(await sshGatewayStatus(config.ssh, profile))) {
+    await sshStartGateway(config.ssh, profile);
   }
 
-  await ensureSshTunnel(config.ssh);
+  const remotePort = await sshResolveApiServerPort(config.ssh, profile);
+  await ensureSshTunnel({ ...config.ssh, remotePort });
   return sshDashboardConnectionFromTunnel(
     config,
     getSshTunnelUrl(),

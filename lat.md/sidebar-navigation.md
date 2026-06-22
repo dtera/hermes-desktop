@@ -38,6 +38,12 @@ The footer profile switcher keeps the selected shell profile aligned with the vi
 
 Opening a sidebar session after switching profiles consumes that blank selected-profile run instead of appending beside it. [[src/renderer/src/screens/Layout/chatRuns.ts#openSessionRunTransition]] replaces the active scratch run when it belongs to the same profile as the resumed session, so the tab strip shows the previous session without an extra "New conversation" tab.
 
+### SSH tunnel profile routing
+
+SSH tunnel chat must retarget the tunnel to the selected profile's configured API port before sending a turn.
+
+[[src/main/ipc/register.ts]] resolves the selected profile's remote `platforms.api_server.extra.port` and calls [[src/main/ssh-tunnel.ts#ensureSshTunnel]] with that port before legacy/basic SSH chat sends. [[src/main/ssh-remote.ts#sshResolveApiServerPort]] auto-allocates and persists a remote profile port when one is missing, while [[src/main/dashboard.ts]] applies the same profile-aware tunnel resolution before dashboard-over-SSH probes. This prevents a dashboard fallback from reusing a default-profile tunnel and making non-default profile chats answer as default.
+
 ## Footer action row
 
 Administrative destinations sit beside the profile switcher so the conversation nav stays short.

@@ -18,6 +18,7 @@ export interface SshConfig {
 
 let tunnelProcess: ChildProcess | null = null;
 let activeConfig: SshConfig | null = null;
+let activeTargetKey: string | null = null;
 let tunnelRunning = false;
 let tunnelStartPromise: Promise<void> | null = null;
 
@@ -119,6 +120,16 @@ function buildSshArgs(config: SshConfig, localPort: number): string[] {
   ];
 }
 
+function tunnelTargetKey(config: SshConfig): string {
+  return [
+    config.host,
+    config.port || 22,
+    config.username,
+    config.keyPath || join(homedir(), ".ssh", "id_rsa"),
+    config.remotePort,
+  ].join("\n");
+}
+
 async function startSshTunnelInner(config: SshConfig): Promise<void> {
   stopSshTunnel();
 
@@ -129,6 +140,7 @@ async function startSshTunnelInner(config: SshConfig): Promise<void> {
 
   const localPort = await findFreePort(config.localPort || 18642);
   activeConfig = { ...config, localPort };
+  activeTargetKey = tunnelTargetKey(config);
   tunnelRunning = false;
 
   let spawnError: Error | null = null;
@@ -148,6 +160,7 @@ async function startSshTunnelInner(config: SshConfig): Promise<void> {
       if (!healthy) {
         tunnelRunning = false;
         activeConfig = null;
+        activeTargetKey = null;
       }
     });
   });
@@ -163,6 +176,7 @@ async function startSshTunnelInner(config: SshConfig): Promise<void> {
     }
     tunnelRunning = false;
     activeConfig = null;
+    activeTargetKey = null;
   });
 
   try {
@@ -213,10 +227,17 @@ export function stopSshTunnel(): void {
   }
   tunnelRunning = false;
   activeConfig = null;
+  activeTargetKey = null;
 }
 
 export async function ensureSshTunnel(config: SshConfig): Promise<void> {
-  if (isSshTunnelActive() && (await isSshTunnelHealthy())) return;
+  if (
+    isSshTunnelActive() &&
+    activeTargetKey === tunnelTargetKey(config) &&
+    (await isSshTunnelHealthy())
+  ) {
+    return;
+  }
   await startSshTunnel(config);
 }
 

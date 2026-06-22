@@ -1807,7 +1807,28 @@ const SYSTEMD_HERMES_UNIT_TEST =
  * start (the status check will then report it as down). The detached
  * `nohup` start is used only when there is no unit to collide with.
  */
-export function buildGatewayStartCommand(): string {
+function remoteGatewayPidPath(profile?: string): string {
+  return profile && profile !== "default"
+    ? `$HOME/.hermes/profiles/${profile}/gateway.pid`
+    : "$HOME/.hermes/gateway.pid";
+}
+
+function remoteGatewayLogPath(profile?: string): string {
+  return profile && profile !== "default"
+    ? `$HOME/.hermes/profiles/${profile}/gateway.log`
+    : "$HOME/.hermes/gateway.log";
+}
+
+export function buildGatewayStartCommand(profile?: string): string {
+  if (profile && profile !== "default") {
+    return (
+      `mkdir -p $HOME/.hermes/profiles/${profile}; ` +
+      `(nohup ${buildRemoteHermesCmd(
+        ["--profile", profile, "gateway", "start"],
+        ` > ${remoteGatewayLogPath(profile)} 2>&1`,
+      )} &);`
+    );
+  }
   return (
     `if ${SYSTEMD_HERMES_UNIT_TEST}; then ` +
     `sudo -n systemctl start hermes.service 2>/dev/null || ` +
@@ -1825,7 +1846,16 @@ export function buildGatewayStartCommand(): string {
  * otherwise it falls back to `hermes gateway stop` and, last resort, the
  * recorded pid.
  */
-export function buildGatewayStopCommand(): string {
+export function buildGatewayStopCommand(profile?: string): string {
+  if (profile && profile !== "default") {
+    const pidPath = remoteGatewayPidPath(profile);
+    return (
+      `${buildRemoteHermesCmd(["--profile", profile, "gateway", "stop"], " 2>/dev/null")} || ` +
+      `(if [ -f ${pidPath} ]; then ` +
+      `pid=$(python3 -c "import json; d=json.load(open('${pidPath}')); print(d['pid'] if isinstance(d,dict) else d)" 2>/dev/null); ` +
+      `[ -n "$pid" ] && kill $pid 2>/dev/null; fi); true`
+    );
+  }
   return (
     `if ${SYSTEMD_HERMES_UNIT_TEST}; then ` +
     `sudo -n systemctl stop hermes.service 2>/dev/null || ` +
@@ -1845,7 +1875,16 @@ export function buildGatewayStopCommand(): string {
  * it is a liveness check on the recorded pid. Prints `active` or `running`
  * when up, anything else when not.
  */
-export function buildGatewayStatusCommand(): string {
+export function buildGatewayStatusCommand(profile?: string): string {
+  if (profile && profile !== "default") {
+    const pidPath = remoteGatewayPidPath(profile);
+    return (
+      `if [ -f ${pidPath} ]; then ` +
+      `pid=$(python3 -c "import json,sys; d=json.load(open('${pidPath}')); print(d.get('pid',d) if isinstance(d,dict) else d)" 2>/dev/null || cat ${pidPath}); ` +
+      `kill -0 $pid 2>/dev/null && echo "running" || echo "stopped"; ` +
+      `else echo "stopped"; fi`
+    );
+  }
   return (
     `if ${SYSTEMD_HERMES_UNIT_TEST}; then ` +
     `systemctl is-active hermes.service 2>/dev/null || true; ` +
@@ -1858,9 +1897,12 @@ export function buildGatewayStatusCommand(): string {
   );
 }
 
-export async function sshGatewayStatus(config: SshConfig): Promise<boolean> {
+export async function sshGatewayStatus(
+  config: SshConfig,
+  profile?: string,
+): Promise<boolean> {
   try {
-    const out = await sshExec(config, buildGatewayStatusCommand());
+    const out = await sshExec(config, buildGatewayStatusCommand(profile));
     const state = out.trim();
     return state === "running" || state === "active";
   } catch {
@@ -1868,20 +1910,170 @@ export async function sshGatewayStatus(config: SshConfig): Promise<boolean> {
   }
 }
 
-export async function sshStartGateway(config: SshConfig): Promise<void> {
+export async function sshStartGateway(
+  config: SshConfig,
+  profile?: string,
+): Promise<void> {
   try {
-    await sshExec(config, buildGatewayStartCommand());
+    await sshExec(config, buildGatewayStartCommand(profile));
   } catch {
     // best effort
   }
 }
 
-export async function sshStopGateway(config: SshConfig): Promise<void> {
+export async function sshStopGateway(
+  config: SshConfig,
+  profile?: string,
+): Promise<void> {
   try {
-    await sshExec(config, buildGatewayStopCommand());
+    await sshExec(config, buildGatewayStopCommand(profile));
   } catch {
     // best effort
   }
+}
+
+export async function sshResolveApiServerPort(
+  config: SshConfig,
+  profile?: string,
+): Promise<number> {
+  if (!profile || profile === "default") return config.remotePort || 8642;
+  const fallbackPort = config.remotePort || 8642;
+  const script = `
+import json, os, re, sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+profile = payload.get("profile")
+fallback_port = int(payload.get("fallbackPort") or 8642)
+home = os.path.expanduser("~/.hermes")
+profiles_dir = os.path.join(home, "profiles")
+
+def config_path(name):
+    if name and name != "default":
+        return os.path.join(profiles_dir, name, "config.yaml")
+    return os.path.join(home, "config.yaml")
+
+def read(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+def line_indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+def api_server_bounds(lines):
+    for i, line in enumerate(lines):
+        if re.match(r"^\\s*api_server\\s*:\\s*(?:#.*)?$", line):
+            indent = line_indent(line)
+            end = len(lines)
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip() and line_indent(lines[j]) <= indent:
+                    end = j
+                    break
+            return i, end, indent
+    return None
+
+def configured_port(text):
+    lines = text.splitlines()
+    bounds = api_server_bounds(lines)
+    if not bounds:
+        return None
+    start, end, _ = bounds
+    for line in lines[start + 1:end]:
+        m = re.match(r"^\\s*port\\s*:\\s*[\\\"']?(\\d+)[\\\"']?\\s*(?:#.*)?$", line)
+        if m:
+            port = int(m.group(1))
+            if 0 < port < 65536:
+                return port
+    return None
+
+def existing_ports():
+    ports = {fallback_port}
+    paths = [config_path(None)]
+    if os.path.isdir(profiles_dir):
+        for name in os.listdir(profiles_dir):
+            p = os.path.join(profiles_dir, name)
+            if os.path.isdir(p):
+                paths.append(os.path.join(p, "config.yaml"))
+    for path in paths:
+        port = configured_port(read(path))
+        if port:
+            ports.add(port)
+    return ports
+
+def allocate_port():
+    used = existing_ports()
+    for port in range(fallback_port + 1, min(65535, fallback_port + 100) + 1):
+        if port not in used:
+            return port
+    return fallback_port
+
+def ensure_profile_port(path, port):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    text = read(path)
+    lines = text.splitlines()
+    bounds = api_server_bounds(lines)
+    if bounds:
+        start, end, indent = bounds
+        for i in range(start + 1, end):
+            if re.match(r"^\\s*port\\s*:", lines[i]):
+                lines[i] = " " * line_indent(lines[i]) + f"port: {port}"
+                break
+        else:
+            extra_index = None
+            extra_indent = indent + 2
+            for i in range(start + 1, end):
+                if re.match(r"^\\s*extra\\s*:\\s*(?:#.*)?$", lines[i]):
+                    extra_index = i
+                    extra_indent = line_indent(lines[i])
+                    break
+            if extra_index is not None:
+                lines.insert(extra_index + 1, " " * (extra_indent + 2) + f"port: {port}")
+            else:
+                lines.insert(start + 1, " " * (indent + 2) + "enabled: true")
+                lines.insert(start + 2, " " * (indent + 2) + "extra:")
+                lines.insert(start + 3, " " * (indent + 4) + f"port: {port}")
+    else:
+        platforms_index = None
+        for i, line in enumerate(lines):
+            if re.match(r"^\\s*platforms\\s*:\\s*(?:#.*)?$", line):
+                platforms_index = i
+                break
+        block = ["  api_server:", "    enabled: true", "    extra:", f"      port: {port}"]
+        if platforms_index is not None:
+            lines[platforms_index + 1:platforms_index + 1] = block
+        else:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.extend(["platforms:", *block])
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\\n".join(lines) + "\\n")
+
+path = config_path(profile)
+current = configured_port(read(path))
+if current:
+    print(current)
+else:
+    port = allocate_port()
+    ensure_profile_port(path, port)
+    print(port)
+`;
+  try {
+    const out = await sshPython(
+      config,
+      script,
+      pythonJsonInput({ profile, fallbackPort }),
+    );
+    const port = parseInt(out.trim(), 10);
+    if (port > 0 && port < 65536) return port;
+  } catch (err) {
+    console.warn(
+      "[ssh] Failed to allocate remote profile API port:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+  return fallbackPort;
 }
 
 // ── Remote API key (for chat auth through SSH tunnel) ─────────────────────────

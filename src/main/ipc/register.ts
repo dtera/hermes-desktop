@@ -44,7 +44,7 @@ import { listCronJobs, createCronJob, removeCronJob, pauseCronJob, resumeCronJob
 import { applyMessagingPlatformUpdate, buildDesktopMessagingPlatforms, fetchRemoteMessagingPlatforms, readLocalGatewayPlatformStates, testDesktopMessagingPlatform, testRemoteMessagingPlatform, updateRemoteMessagingPlatform } from "../messaging-platforms";
 import { listBoards as kanbanListBoards, currentBoard as kanbanCurrentBoard, switchBoard as kanbanSwitchBoard, createBoard as kanbanCreateBoard, removeBoard as kanbanRemoveBoard, listTasks as kanbanListTasks, getTask as kanbanGetTask, createTask as kanbanCreateTask, assignTask as kanbanAssignTask, completeTask as kanbanCompleteTask, blockTask as kanbanBlockTask, unblockTask as kanbanUnblockTask, archiveTask as kanbanArchiveTask, promoteTask as kanbanPromoteTask, scheduleTask as kanbanScheduleTask, specifyTask as kanbanSpecifyTask, reclaimTask as kanbanReclaimTask, commentTask as kanbanCommentTask, dispatchOnce as kanbanDispatchOnce, listClaw3dHqTasks as kanbanListClaw3dHqTasks, type CreateTaskInput } from "../kanban";
 import { getAppLocale, setAppLocale } from "../locale";
-import { sshListInstalledSkills, sshGetSkillContent, sshInstallSkill, sshUninstallSkill, sshListBundledSkills, sshReadMemory, sshAddMemoryEntry, sshUpdateMemoryEntry, sshRemoveMemoryEntry, sshWriteUserProfile, sshReadSoul, sshWriteSoul, sshResetSoul, sshGetToolsets, sshGetPlatformToolsets, sshSetToolsetEnabled, sshSetMessagingPlatformToolsetEnabled, sshReadEnv, sshSetEnvValue, sshGetConfigValue, sshSetConfigValue, sshGetHermesHome, sshGetModelConfig, sshSetModelConfig, sshListSessions, sshGetSessionMessages, sshSearchSessions, sshListProfiles, sshCreateProfile, sshDeleteProfile, sshGatewayStatus, sshStartGateway, sshStopGateway, sshReadRemoteApiKey, sshReadDirectory, sshGetHermesVersion, sshReadLogs, sshGetPlatformEnabled, sshSetPlatformEnabled, sshListCachedSessions, sshRunDoctor, sshListModels, sshAddModel, sshRemoveModel, sshUpdateModel, sshRunUpdate, sshRunDump, sshDiscoverMemoryProviders } from "../ssh-remote";
+import { sshListInstalledSkills, sshGetSkillContent, sshInstallSkill, sshUninstallSkill, sshListBundledSkills, sshReadMemory, sshAddMemoryEntry, sshUpdateMemoryEntry, sshRemoveMemoryEntry, sshWriteUserProfile, sshReadSoul, sshWriteSoul, sshResetSoul, sshGetToolsets, sshGetPlatformToolsets, sshSetToolsetEnabled, sshSetMessagingPlatformToolsetEnabled, sshReadEnv, sshSetEnvValue, sshGetConfigValue, sshSetConfigValue, sshGetHermesHome, sshGetModelConfig, sshSetModelConfig, sshListSessions, sshGetSessionMessages, sshSearchSessions, sshListProfiles, sshCreateProfile, sshDeleteProfile, sshGatewayStatus, sshStartGateway, sshStopGateway, sshReadRemoteApiKey, sshResolveApiServerPort, sshReadDirectory, sshGetHermesVersion, sshReadLogs, sshGetPlatformEnabled, sshSetPlatformEnabled, sshListCachedSessions, sshRunDoctor, sshListModels, sshAddModel, sshRemoveModel, sshUpdateModel, sshRunUpdate, sshRunDump, sshDiscoverMemoryProviders } from "../ssh-remote";
 
 export interface IpcContext {
   activeRuns: Map<string, () => void>;
@@ -58,10 +58,11 @@ const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME?.trim() || "Hermes One";
 
 type RemoteSessionBridgeConfig = RemoteSessionConfig;
 
-async function getSshDashboardSessionConfig(conn: ConnectionConfig): Promise<RemoteSessionBridgeConfig> {
+async function getSshDashboardSessionConfig(conn: ConnectionConfig, profile?: string): Promise<RemoteSessionBridgeConfig> {
   if (conn.mode !== "ssh" || !conn.ssh) throw new Error("SSH connection is not configured.");
-  if (!(await sshGatewayStatus(conn.ssh))) await sshStartGateway(conn.ssh);
-  await ensureSshTunnel(conn.ssh);
+  if (!(await sshGatewayStatus(conn.ssh, profile))) await sshStartGateway(conn.ssh, profile);
+  const remotePort = await sshResolveApiServerPort(conn.ssh, profile);
+  await ensureSshTunnel({ ...conn.ssh, remotePort });
   const remoteUrl = getSshTunnelUrl();
   const apiKey = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
   if (!remoteUrl) throw new Error("SSH tunnel is not active.");
@@ -70,20 +71,20 @@ async function getSshDashboardSessionConfig(conn: ConnectionConfig): Promise<Rem
   return { remoteUrl, apiKey };
 }
 
-async function withSshDashboardSessions<T>(conn: ConnectionConfig, dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>, legacyOperation?: () => Promise<T> | T): Promise<T> {
+async function withSshDashboardSessions<T>(conn: ConnectionConfig, dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>, legacyOperation?: () => Promise<T> | T, profile?: string): Promise<T> {
   if (conn.sshChatTransport === "legacy") {
     if (legacyOperation) return legacyOperation();
     throw new Error("This SSH session operation requires dashboard transport.");
   }
   try {
-    return await dashboardOperation(await getSshDashboardSessionConfig(conn));
+    return await dashboardOperation(await getSshDashboardSessionConfig(conn, profile));
   } catch (err) {
     if (conn.sshChatTransport === "auto" && legacyOperation) return legacyOperation();
     throw err;
   }
 }
 
-async function withSshDashboardModelLibrary<T>(conn: ConnectionConfig, dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>, legacyOperation: () => Promise<T> | T): Promise<T> {
+async function withSshDashboardModelLibrary<T>(conn: ConnectionConfig, dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>, legacyOperation: () => Promise<T> | T, profile?: string): Promise<T> {
   if (conn.mode !== "ssh" || !conn.ssh) throw new Error("SSH connection is not configured.");
   if (conn.sshChatTransport === "legacy") return legacyOperation();
   const compat = await ensureSshDashboardCompatibility(conn.ssh);
@@ -92,9 +93,9 @@ async function withSshDashboardModelLibrary<T>(conn: ConnectionConfig, dashboard
   } else if (compat.applied) {
     try { await sshStopGateway(conn.ssh); } catch (err) { console.warn("[ssh-model-library] Failed to stop patched gateway", err); }
     stopSshTunnel();
-    await sshStartGateway(conn.ssh);
+    await sshStartGateway(conn.ssh, profile);
   }
-  return dashboardOperation(await getSshDashboardSessionConfig(conn));
+  return dashboardOperation(await getSshDashboardSessionConfig(conn, profile));
 }
 
 async function withRemoteDashboard<T>(conn: ConnectionConfig, dashboardOperation: () => Promise<T>, legacyOperation: () => Promise<T> | T): Promise<T> {
@@ -749,12 +750,13 @@ export function registerIpcHandlers(context: IpcContext): void {
       await ensureSshTunnelIfNeeded();
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh) {
-        const gatewayRunning = await sshGatewayStatus(conn.ssh);
+        const gatewayRunning = await sshGatewayStatus(conn.ssh, profile);
         const tunnelHealthy = await isSshTunnelHealthy();
+        const remotePort = await sshResolveApiServerPort(conn.ssh, profile);
         if (!gatewayRunning || !tunnelHealthy) {
-          await sshStartGateway(conn.ssh);
-          await ensureSshTunnel(conn.ssh);
+          await sshStartGateway(conn.ssh, profile);
         }
+        await ensureSshTunnel({ ...conn.ssh, remotePort });
         // Always ensure the API key is cached — the key may not have been
         // read yet if the app-launch auto-start failed silently (#212).
         if (!getRemoteAuthHeader().Authorization) {
