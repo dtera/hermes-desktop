@@ -62,6 +62,12 @@ SSH tunnel chat must retarget the tunnel to the selected profile's configured AP
 
 [[src/main/ipc/register.ts]] resolves the selected profile's remote `platforms.api_server.extra.port` and calls [[src/main/ssh-tunnel.ts#ensureSshTunnel]] with that port before legacy/basic SSH chat sends. [[src/main/ssh-remote.ts#sshResolveApiServerPort]] auto-allocates and persists a remote profile port when one is missing, while [[src/main/dashboard.ts]] applies the same profile-aware tunnel resolution before dashboard-over-SSH probes. This prevents a dashboard fallback from reusing a default-profile tunnel and making non-default profile chats answer as default.
 
+### Remote launcher profile resolution
+
+Managed SSH installs can store Hermes outside the SSH user's home or under a different `HERMES_HOME`, so Office/Agents must read profiles from the actual remote runtime rather than a `~/.hermes` filesystem scan.
+
+[[src/main/ssh-remote.ts#buildRemoteHermesCmd]] probes per-user launcher hooks (`$HOME/.config/hermes-desktop/remote-hermes`, `$HOME/.hermes/desktop-remote-hermes`) before the default venv/PATH locations, letting a deployment supply its own wrapper that sets the right command, service user, and `HERMES_HOME`. [[src/main/ssh-remote.ts#sshListProfiles]] detects whether such a launcher actually exists in one round trip, then [[src/main/ssh-remote.ts#selectSshProfiles]] treats a present launcher as authoritative — preferring its profiles over the scan even on an equal count, so a managed `default`-only install shows live gateway state instead of stale home-directory data. Named-profile Schedules route the same way through [[src/main/ssh-remote.ts#sshRunCron]], while the default profile keeps the existing HTTP `/api/jobs` path.
+
 ## Profile detail modal
 
 A single global modal (80vw × 80vh) with a left-section nav views and edits a profile, opened from anywhere via a context hook so future profile features share one surface.

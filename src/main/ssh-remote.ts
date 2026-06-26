@@ -1682,20 +1682,74 @@ export function parseHermesProfileListOutput(output: string): SshProfileInfo[] {
   return profiles;
 }
 
-async function sshListProfilesViaHermesCli(
+// Per-user launcher hooks a managed deployment can drop in to wrap the real
+// Hermes CLI (custom HERMES_HOME, service user, unusual filesystem layout).
+// Kept in sync with the launcher probe order in buildRemoteHermesCmd.
+const REMOTE_HERMES_LAUNCHER_CANDIDATES = [
+  "$HOME/.config/hermes-desktop/remote-hermes",
+  "$HOME/.hermes/desktop-remote-hermes",
+];
+
+const LAUNCHER_PRESENT_SENTINEL = "__HERMES_REMOTE_LAUNCHER__";
+
+export interface LauncherProfileResult {
+  // Whether an executable launcher hook actually exists on the remote. This is
+  // distinct from "the CLI returned profiles": the regular hermes binary on
+  // PATH can answer `profile list` even with no launcher configured, so count
+  // heuristics cannot tell the two apart — only this flag can.
+  present: boolean;
+  profiles: SshProfileInfo[];
+}
+
+// Detect whether a remote launcher hook exists and, if so, list its profiles in
+// a single round trip. When no launcher is configured the loop exits without
+// invoking the Hermes CLI, so ordinary installs stay cheap and fall through to
+// the richer filesystem scan in sshListProfiles.
+async function sshDetectLauncherProfiles(
   config: SshConfig,
-): Promise<SshProfileInfo[]> {
+): Promise<LauncherProfileResult> {
+  const list = REMOTE_HERMES_LAUNCHER_CANDIDATES.map((p) => `"${p}"`).join(" ");
+  // Echo the sentinel BEFORE exec so it is flushed even though exec replaces
+  // the shell; `exec` then streams the launcher's `profile list` to the same
+  // stdout. No launcher → no sentinel, empty output.
+  const script =
+    `for p in ${list}; do ` +
+    `[ -x "$p" ] && { echo ${LAUNCHER_PRESENT_SENTINEL}; exec "$p" profile list 2>/dev/null; }; ` +
+    `done`;
   try {
     const out = await sshExec(
       config,
-      buildRemoteHermesCmd(["profile", "list"], " 2>/dev/null"),
+      `sh -c ${shellQuote(script)}`,
       undefined,
       20000,
     );
-    return parseHermesProfileListOutput(out);
+    if (!out.includes(LAUNCHER_PRESENT_SENTINEL)) {
+      return { present: false, profiles: [] };
+    }
+    const cleaned = out
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== LAUNCHER_PRESENT_SENTINEL)
+      .join("\n");
+    return { present: true, profiles: parseHermesProfileListOutput(cleaned) };
   } catch {
-    return [];
+    return { present: false, profiles: [] };
   }
+}
+
+// Decide which profile list represents the actual remote runtime. A configured
+// launcher runs against the deployment's real HERMES_HOME and is authoritative;
+// the filesystem scan always assumes ~/.hermes. Prefer the launcher whenever it
+// is present and returned profiles — even when it reports the SAME number of
+// profiles as the scan — so Office/Agents reflect the live runtime instead of
+// stale home-directory state. Exported for unit testing the decision in
+// isolation from any live SSH host.
+export function selectSshProfiles(
+  launcher: LauncherProfileResult,
+  scannedProfiles: SshProfileInfo[],
+): SshProfileInfo[] {
+  if (launcher.present && launcher.profiles.length > 0) return launcher.profiles;
+  if (scannedProfiles.length > 0) return scannedProfiles;
+  return launcher.profiles;
 }
 
 export async function sshListProfiles(
@@ -1768,20 +1822,18 @@ if os.path.isdir(profiles_dir):
 
 print(json.dumps(profiles))
 `;
-  const cliProfiles = await sshListProfilesViaHermesCli(config);
+  const launcher = await sshDetectLauncherProfiles(config);
 
   try {
     const out = await sshPython(config, script);
     const scannedProfiles = JSON.parse(out.trim() || "[]") as SshProfileInfo[];
-    // The filesystem scan is richer for default HOME installs, but it assumes
-    // ~/.hermes. Managed SSH deployments often put HERMES_HOME elsewhere and
-    // expose the right environment through the remote Hermes launcher. When
-    // the launcher sees more profiles, prefer it as the source of truth so
-    // Office/Agents reflect the actual remote runtime.
-    if (cliProfiles.length > scannedProfiles.length) return cliProfiles;
-    return scannedProfiles.length > 0 ? scannedProfiles : cliProfiles;
+    return selectSshProfiles(launcher, scannedProfiles);
   } catch {
-    if (cliProfiles.length > 0) return cliProfiles;
+    // The filesystem scan failed (e.g. no python on the remote). A configured
+    // launcher is still authoritative; otherwise fall back to a minimal default.
+    if (launcher.present && launcher.profiles.length > 0) {
+      return launcher.profiles;
+    }
     return [
       {
         name: "default",
@@ -2547,10 +2599,7 @@ export async function sshListCachedSessions(
 //
 // Exported for unit testing the probe list without a live remote host.
 export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
-  const launcherCandidates = [
-    "$HOME/.config/hermes-desktop/remote-hermes",
-    "$HOME/.hermes/desktop-remote-hermes",
-  ];
+  const launcherCandidates = REMOTE_HERMES_LAUNCHER_CANDIDATES;
   const candidates = [
     "$HOME/hermes-agent/.venv/bin/hermes",
     "$HOME/hermes-agent/venv/bin/hermes",

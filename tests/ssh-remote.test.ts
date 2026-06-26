@@ -15,8 +15,29 @@ import {
   buildGatewayStopCommand,
   buildGatewayStatusCommand,
   parseHermesProfileListOutput,
+  selectSshProfiles,
 } from "../src/main/ssh-remote";
+import type { SshProfileInfo } from "../src/main/ssh-remote";
 import type { SshConfig } from "../src/main/ssh-tunnel";
+
+function profile(
+  name: string,
+  overrides: Partial<SshProfileInfo> = {},
+): SshProfileInfo {
+  return {
+    name,
+    path: name === "default" ? "~/.hermes" : `~/.hermes/profiles/${name}`,
+    isDefault: name === "default",
+    isActive: name === "default",
+    model: "",
+    provider: "auto",
+    hasEnv: false,
+    hasSoul: false,
+    skillCount: 0,
+    gatewayRunning: false,
+    ...overrides,
+  };
+}
 
 /** The `then` clause of the leading `if` — the systemd-managed branch. */
 function systemdBranch(command: string): string {
@@ -262,5 +283,51 @@ describe("parseHermesProfileListOutput", () => {
 
     expect(profiles.find((p) => p.name === "default")?.isActive).toBe(true);
     expect(profiles.find((p) => p.name === "marketing")?.isActive).toBe(false);
+  });
+});
+
+describe("selectSshProfiles", () => {
+  it("prefers the launcher runtime over an equal-length home-directory scan", () => {
+    // Greptile P1: a managed install whose launcher reports the SAME profile
+    // count as the SSH user's ~/.hermes scan must still surface the launcher's
+    // live state (correct HERMES_HOME, real gateway status), not the stale scan.
+    const launcher = {
+      present: true,
+      profiles: [profile("default", { gatewayRunning: true, model: "gpt-5.5" })],
+    };
+    const scanned = [profile("default", { gatewayRunning: false })];
+
+    const result = selectSshProfiles(launcher, scanned);
+
+    expect(result).toBe(launcher.profiles);
+    expect(result[0].gatewayRunning).toBe(true);
+  });
+
+  it("prefers the launcher even when the home-directory scan has more profiles", () => {
+    const launcher = { present: true, profiles: [profile("default")] };
+    const scanned = [profile("default"), profile("leftover-home-profile")];
+
+    expect(selectSshProfiles(launcher, scanned)).toBe(launcher.profiles);
+  });
+
+  it("falls back to the filesystem scan when no launcher is configured", () => {
+    // Without a launcher, launcher.profiles is empty and the richer scan wins.
+    const launcher = { present: false, profiles: [] };
+    const scanned = [profile("default"), profile("marketing")];
+
+    expect(selectSshProfiles(launcher, scanned)).toBe(scanned);
+  });
+
+  it("falls back to the scan when a launcher exists but returns no profiles", () => {
+    const launcher = { present: true, profiles: [] };
+    const scanned = [profile("default")];
+
+    expect(selectSshProfiles(launcher, scanned)).toBe(scanned);
+  });
+
+  it("returns launcher profiles when the scan is empty", () => {
+    const launcher = { present: true, profiles: [profile("default")] };
+
+    expect(selectSshProfiles(launcher, [])).toBe(launcher.profiles);
   });
 });
