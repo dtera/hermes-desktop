@@ -14,8 +14,30 @@ import {
   buildGatewayStartCommand,
   buildGatewayStopCommand,
   buildGatewayStatusCommand,
+  parseHermesProfileListOutput,
+  selectSshProfiles,
 } from "../src/main/ssh-remote";
+import type { SshProfileInfo } from "../src/main/ssh-remote";
 import type { SshConfig } from "../src/main/ssh-tunnel";
+
+function profile(
+  name: string,
+  overrides: Partial<SshProfileInfo> = {},
+): SshProfileInfo {
+  return {
+    name,
+    path: name === "default" ? "~/.hermes" : `~/.hermes/profiles/${name}`,
+    isDefault: name === "default",
+    isActive: name === "default",
+    model: "",
+    provider: "auto",
+    hasEnv: false,
+    hasSoul: false,
+    skillCount: 0,
+    gatewayRunning: false,
+    ...overrides,
+  };
+}
 
 /** The `then` clause of the leading `if` — the systemd-managed branch. */
 function systemdBranch(command: string): string {
@@ -104,7 +126,7 @@ describe("ssh Hermes command quoting", () => {
       "sh -c '[ -x $HOME/hermes-agent/.venv/bin/hermes ] && exec $HOME/hermes-agent/.venv/bin/hermes 'kanban' 'create'",
     );
     expect(command).toContain(
-      `sh -c '[ -x $HOME/hermes-agent/.venv/bin/hermes ] && exec $HOME/hermes-agent/.venv/bin/hermes '"'"'kanban'"'"'`,
+      `$HOME/hermes-agent/.venv/bin/hermes '"'"'kanban'"'"'`,
     );
   });
 
@@ -187,6 +209,16 @@ describe("ssh gateway commands (issue #285)", () => {
 describe("buildRemoteHermesCmd venv probe (issue #284)", () => {
   const cmd = buildRemoteHermesCmd(["--version"]);
 
+  it("probes explicit remote launcher hooks before default install paths", () => {
+    const configLauncher = "$HOME/.config/hermes-desktop/remote-hermes";
+    const legacyLauncher = "$HOME/.hermes/desktop-remote-hermes";
+    expect(cmd).toContain(configLauncher);
+    expect(cmd).toContain(legacyLauncher);
+    expect(cmd.indexOf(configLauncher)).toBeLessThan(
+      cmd.indexOf("$HOME/hermes-agent/.venv/bin/hermes"),
+    );
+  });
+
   it("probes both .venv and venv for every install base", () => {
     for (const base of [
       "$HOME/hermes-agent",
@@ -202,11 +234,100 @@ describe("buildRemoteHermesCmd venv probe (issue #284)", () => {
     expect(cmd).toContain("$HOME/.local/bin/hermes");
   });
 
+  it("does not bake in deployment-specific managed runtime defaults", () => {
+    expect(cmd).not.toContain("/projects/hermes-runtime");
+    expect(cmd).not.toContain("sudo -n -u hermes");
+  });
+
   it("does not probe the /usr/local/bin sudo-wrapper it deliberately bypasses", () => {
     expect(cmd).not.toContain("/usr/local/bin/hermes");
   });
 
   it("still falls back to bare hermes on PATH", () => {
     expect(cmd).toContain("command -v hermes");
+  });
+});
+
+describe("parseHermesProfileListOutput", () => {
+  it("parses the Hermes profile table used by managed SSH launchers", () => {
+    const profiles = parseHermesProfileListOutput(`
+ Profile              Model                        Gateway      Alias        Distribution
+ ───────────────      ───────────────────────────  ───────────  ───────────  ────────────────────
+ ◆default             gpt-5.5                      running      —            —
+  biz-office          gpt-5.5                      running      biz-office   —
+  finance-accounting  gpt-5.5                      stopped      finance-accounting —
+  marketing           gpt-5.5                      running      marketing    —
+`);
+
+    expect(profiles.map((p) => p.name)).toEqual([
+      "default",
+      "biz-office",
+      "finance-accounting",
+      "marketing",
+    ]);
+    expect(profiles.find((p) => p.name === "default")?.isActive).toBe(true);
+    expect(profiles.find((p) => p.name === "marketing")?.gatewayRunning).toBe(
+      true,
+    );
+    expect(
+      profiles.find((p) => p.name === "finance-accounting")?.gatewayRunning,
+    ).toBe(false);
+  });
+
+  it("marks default active when the table has no active marker", () => {
+    const profiles = parseHermesProfileListOutput(`
+ Profile          Model       Gateway
+ default          gpt-5.5     running
+ marketing        gpt-5.5     stopped
+`);
+
+    expect(profiles.find((p) => p.name === "default")?.isActive).toBe(true);
+    expect(profiles.find((p) => p.name === "marketing")?.isActive).toBe(false);
+  });
+});
+
+describe("selectSshProfiles", () => {
+  it("prefers the launcher runtime over an equal-length home-directory scan", () => {
+    // Greptile P1: a managed install whose launcher reports the SAME profile
+    // count as the SSH user's ~/.hermes scan must still surface the launcher's
+    // live state (correct HERMES_HOME, real gateway status), not the stale scan.
+    const launcher = {
+      present: true,
+      profiles: [profile("default", { gatewayRunning: true, model: "gpt-5.5" })],
+    };
+    const scanned = [profile("default", { gatewayRunning: false })];
+
+    const result = selectSshProfiles(launcher, scanned);
+
+    expect(result).toBe(launcher.profiles);
+    expect(result[0].gatewayRunning).toBe(true);
+  });
+
+  it("prefers the launcher even when the home-directory scan has more profiles", () => {
+    const launcher = { present: true, profiles: [profile("default")] };
+    const scanned = [profile("default"), profile("leftover-home-profile")];
+
+    expect(selectSshProfiles(launcher, scanned)).toBe(launcher.profiles);
+  });
+
+  it("falls back to the filesystem scan when no launcher is configured", () => {
+    // Without a launcher, launcher.profiles is empty and the richer scan wins.
+    const launcher = { present: false, profiles: [] };
+    const scanned = [profile("default"), profile("marketing")];
+
+    expect(selectSshProfiles(launcher, scanned)).toBe(scanned);
+  });
+
+  it("falls back to the scan when a launcher exists but returns no profiles", () => {
+    const launcher = { present: true, profiles: [] };
+    const scanned = [profile("default")];
+
+    expect(selectSshProfiles(launcher, scanned)).toBe(scanned);
+  });
+
+  it("returns launcher profiles when the scan is empty", () => {
+    const launcher = { present: true, profiles: [profile("default")] };
+
+    expect(selectSshProfiles(launcher, [])).toBe(launcher.profiles);
   });
 });

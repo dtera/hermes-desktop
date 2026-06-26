@@ -1641,6 +1641,117 @@ export interface SshProfileInfo {
   gatewayRunning: boolean;
 }
 
+export function parseHermesProfileListOutput(output: string): SshProfileInfo[] {
+  const profiles: SshProfileInfo[] = [];
+
+  for (const rawLine of output.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    if (/^profile\s+model\s+gateway\b/i.test(trimmed)) continue;
+    if (/^[─\-\s]+$/.test(trimmed)) continue;
+
+    const active = /^[◆*]/.test(trimmed);
+    const line = trimmed.replace(/^[◆*]\s*/, "");
+    const parts = line.split(/\s+/);
+    if (parts.length < 3) continue;
+
+    const [name, model, gateway] = parts;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) continue;
+    const gatewayState = gateway.toLowerCase();
+    if (gatewayState !== "running" && gatewayState !== "stopped") continue;
+
+    profiles.push({
+      name,
+      path: name === "default" ? "~/.hermes" : `~/.hermes/profiles/${name}`,
+      isDefault: name === "default",
+      isActive: active,
+      model: model === "—" ? "" : model,
+      provider: "auto",
+      hasEnv: false,
+      hasSoul: false,
+      skillCount: 0,
+      gatewayRunning: gatewayState === "running",
+    });
+  }
+
+  if (profiles.length > 0 && !profiles.some((p) => p.isActive)) {
+    const defaultProfile = profiles.find((p) => p.isDefault) ?? profiles[0];
+    defaultProfile.isActive = true;
+  }
+
+  return profiles;
+}
+
+// Per-user launcher hooks a managed deployment can drop in to wrap the real
+// Hermes CLI (custom HERMES_HOME, service user, unusual filesystem layout).
+// Kept in sync with the launcher probe order in buildRemoteHermesCmd.
+const REMOTE_HERMES_LAUNCHER_CANDIDATES = [
+  "$HOME/.config/hermes-desktop/remote-hermes",
+  "$HOME/.hermes/desktop-remote-hermes",
+];
+
+const LAUNCHER_PRESENT_SENTINEL = "__HERMES_REMOTE_LAUNCHER__";
+
+export interface LauncherProfileResult {
+  // Whether an executable launcher hook actually exists on the remote. This is
+  // distinct from "the CLI returned profiles": the regular hermes binary on
+  // PATH can answer `profile list` even with no launcher configured, so count
+  // heuristics cannot tell the two apart — only this flag can.
+  present: boolean;
+  profiles: SshProfileInfo[];
+}
+
+// Detect whether a remote launcher hook exists and, if so, list its profiles in
+// a single round trip. When no launcher is configured the loop exits without
+// invoking the Hermes CLI, so ordinary installs stay cheap and fall through to
+// the richer filesystem scan in sshListProfiles.
+async function sshDetectLauncherProfiles(
+  config: SshConfig,
+): Promise<LauncherProfileResult> {
+  const list = REMOTE_HERMES_LAUNCHER_CANDIDATES.map((p) => `"${p}"`).join(" ");
+  // Echo the sentinel BEFORE exec so it is flushed even though exec replaces
+  // the shell; `exec` then streams the launcher's `profile list` to the same
+  // stdout. No launcher → no sentinel, empty output.
+  const script =
+    `for p in ${list}; do ` +
+    `[ -x "$p" ] && { echo ${LAUNCHER_PRESENT_SENTINEL}; exec "$p" profile list 2>/dev/null; }; ` +
+    `done`;
+  try {
+    const out = await sshExec(
+      config,
+      `sh -c ${shellQuote(script)}`,
+      undefined,
+      20000,
+    );
+    if (!out.includes(LAUNCHER_PRESENT_SENTINEL)) {
+      return { present: false, profiles: [] };
+    }
+    const cleaned = out
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== LAUNCHER_PRESENT_SENTINEL)
+      .join("\n");
+    return { present: true, profiles: parseHermesProfileListOutput(cleaned) };
+  } catch {
+    return { present: false, profiles: [] };
+  }
+}
+
+// Decide which profile list represents the actual remote runtime. A configured
+// launcher runs against the deployment's real HERMES_HOME and is authoritative;
+// the filesystem scan always assumes ~/.hermes. Prefer the launcher whenever it
+// is present and returned profiles — even when it reports the SAME number of
+// profiles as the scan — so Office/Agents reflect the live runtime instead of
+// stale home-directory state. Exported for unit testing the decision in
+// isolation from any live SSH host.
+export function selectSshProfiles(
+  launcher: LauncherProfileResult,
+  scannedProfiles: SshProfileInfo[],
+): SshProfileInfo[] {
+  if (launcher.present && launcher.profiles.length > 0) return launcher.profiles;
+  if (scannedProfiles.length > 0) return scannedProfiles;
+  return launcher.profiles;
+}
+
 export async function sshListProfiles(
   config: SshConfig,
 ): Promise<SshProfileInfo[]> {
@@ -1711,10 +1822,18 @@ if os.path.isdir(profiles_dir):
 
 print(json.dumps(profiles))
 `;
+  const launcher = await sshDetectLauncherProfiles(config);
+
   try {
     const out = await sshPython(config, script);
-    return JSON.parse(out.trim() || "[]");
+    const scannedProfiles = JSON.parse(out.trim() || "[]") as SshProfileInfo[];
+    return selectSshProfiles(launcher, scannedProfiles);
   } catch {
+    // The filesystem scan failed (e.g. no python on the remote). A configured
+    // launcher is still authoritative; otherwise fall back to a minimal default.
+    if (launcher.present && launcher.profiles.length > 0) {
+      return launcher.profiles;
+    }
     return [
       {
         name: "default",
@@ -2153,6 +2272,38 @@ export async function sshRunKanban<T = unknown>(
   }
 }
 
+export interface SshCronResult {
+  success: boolean;
+  error?: string;
+  stdout?: string;
+}
+
+export async function sshRunCron(
+  config: SshConfig,
+  args: string[],
+  opts: { profile?: string; timeoutMs?: number } = {},
+): Promise<SshCronResult> {
+  const cliArgs: string[] = [];
+  if (opts.profile && opts.profile !== "default") {
+    cliArgs.push("-p", opts.profile);
+  }
+  cliArgs.push("cron", ...args);
+  try {
+    const stdout = await sshExec(
+      config,
+      buildRemoteHermesCmd(cliArgs),
+      undefined,
+      opts.timeoutMs ?? 15000,
+    );
+    return { success: true, stdout };
+  } catch (err) {
+    return {
+      success: false,
+      error: (err as Error).message || "Remote cron command failed",
+    };
+  }
+}
+
 // ── Claw3D HQ board (read-only) ───────────────────────────────────────────────
 //
 // Claw3D ("hermes-office") maintains its own headquarters task board independent
@@ -2437,12 +2588,18 @@ export async function sshListCachedSessions(
 // directory name is not fixed, and an install that uses the un-dotted
 // `venv` was otherwise invisible even when fully working (issue #284).
 // `~/.local/bin/hermes` is also probed, where `pip install --user` flows
-// place a wrapper. `command -v hermes` alone is not enough: the desktop's
-// non-interactive SSH does not source `~/.profile`/`~/.bashrc`, so any
-// PATH additions made there are not visible.
+// place a wrapper. Before those default install paths, probe explicit
+// per-user launcher hooks. They let managed deployments provide their own
+// executable wrapper for unusual filesystem layouts, service users, or
+// HERMES_HOME requirements without baking deployment-specific paths into the
+// desktop.
+// `command -v hermes` alone is not enough: the desktop's non-interactive SSH
+// does not source `~/.profile`/`~/.bashrc`, so any PATH additions made there
+// are not visible.
 //
 // Exported for unit testing the probe list without a live remote host.
 export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
+  const launcherCandidates = REMOTE_HERMES_LAUNCHER_CANDIDATES;
   const candidates = [
     "$HOME/hermes-agent/.venv/bin/hermes",
     "$HOME/hermes-agent/venv/bin/hermes",
@@ -2453,10 +2610,13 @@ export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
     "$HOME/.local/bin/hermes",
   ];
   const quotedArgs = args.map((a) => shellQuote(a)).join(" ");
+  const launcherProbe = launcherCandidates
+    .map((p) => `[ -x ${p} ] && exec ${p} ${quotedArgs}${extraShell}`)
+    .join("; ");
   const probe = candidates
     .map((p) => `[ -x ${p} ] && exec ${p} ${quotedArgs}${extraShell}`)
     .join("; ");
-  const script = `${probe}; command -v hermes >/dev/null && exec hermes ${quotedArgs}${extraShell}; echo "ERR: hermes CLI not found on remote PATH or in any known venv location" >&2; exit 1`;
+  const script = `${launcherProbe}; ${probe}; command -v hermes >/dev/null && exec hermes ${quotedArgs}${extraShell}; echo "ERR: hermes CLI not found on remote PATH, configured launcher, or in any known venv location" >&2; exit 1`;
   return `sh -c ${shellQuote(script)}`;
 }
 
